@@ -1,4 +1,4 @@
-package com.example.educatmobile
+package com.codeweb.educatmobile
 
 import io.flutter.embedding.android.FlutterActivity
 

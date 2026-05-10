@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/user_model.dart';
 import '../services/auth_provider.dart';
 import '../services/session_manager.dart';
+import '../services/notification_service.dart';
+import '../services/api_service.dart';
 import '../utils/app_colors.dart';
 import 'guardian_dashboard.dart';
 import 'teacher_dashboard.dart';
+import 'admin_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,10 +30,12 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberSchool = true;
 
   late SessionManager _sessionManager;
+  late ApiService _apiService;
 
   @override
   void initState() {
     super.initState();
+    _apiService = ApiService();
     _loadSavedData();
   }
 
@@ -37,14 +43,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final prefs = await SharedPreferences.getInstance();
     _sessionManager = SessionManager(prefs);
 
-    // Load saved school registration number
     final savedSchoolReg = _sessionManager.getSavedSchoolRegNo();
     if (savedSchoolReg != null && savedSchoolReg.isNotEmpty) {
       _schoolRegNoController.text = savedSchoolReg;
       _rememberSchool = _sessionManager.getRememberSchool();
     }
 
-    // Load saved email and password if remember me was checked
     final savedEmail = _sessionManager.getSavedEmail();
     final savedPassword = _sessionManager.getSavedPassword();
     final rememberMe = _sessionManager.getRememberMe();
@@ -70,6 +74,33 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _registerFcmToken(UserModel user, String authToken) async {
+    try {
+      final notificationService = NotificationService();
+      final fcmToken = notificationService.fcmToken;
+
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        final userRole = user.isTeacher ? 'Teacher' : (user.isGuardian ? 'Guardian' : 'SchoolAdmin');
+
+        await _apiService.saveFcmToken(
+          token: authToken,
+          userId: user.id,
+          userRole: userRole,
+          fcmToken: fcmToken,
+        );
+
+        // Subscribe to topics
+        await notificationService.subscribeToTopic('all_users');
+        await notificationService.subscribeToTopic(user.role.toLowerCase());
+        await notificationService.subscribeToTopic('school_${user.schoolId}');
+
+        print('✅ FCM Token registered successfully');
+      }
+    } catch (e) {
+      print('❌ Error registering FCM token: $e');
+    }
+  }
+
   Future<void> _handleLogin() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
@@ -78,13 +109,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-      // Save school registration number
       await _sessionManager.saveSchoolRegNo(
         _schoolRegNoController.text.trim(),
         remember: _rememberSchool,
       );
 
-      // Save email and password if remember me is checked
       if (_rememberMe) {
         await _sessionManager.saveEmail(_emailController.text.trim(), remember: true);
         await _sessionManager.savePassword(_passwordController.text, remember: true);
@@ -103,16 +132,46 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (success && mounted) {
         final user = authProvider.currentUser;
+        final authToken = authProvider.token!;
+        final userRole = user?.role ?? '';
 
-        if (user?.isGuardian == true) {
+        // Register FCM token for push notifications
+        await _registerFcmToken(user!, authToken);
+
+        print('User Role from JWT: $userRole');
+        print('isAdmin: ${user.isAdmin}');
+        print('isTeacher: ${user.isTeacher}');
+        print('isGuardian: ${user.isGuardian}');
+
+        // Route based on role
+        if (userRole == 'SchoolAdmin') {
+          print('Navigating to Admin Dashboard');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const AdminDashboard()),
+          );
+        }
+        else if (userRole == 'Teacher') {
+          print('Navigating to Teacher Dashboard');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => TeacherDashboard(user: user)),
+          );
+        }
+        else if (userRole == 'Guardian') {
+          print('Navigating to Guardian Dashboard');
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const GuardianDashboard()),
           );
-        } else if (user?.isTeacher == true) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => TeacherDashboard(user: user!)),
+        }
+        else {
+          print('Unknown role: $userRole');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Unknown user role: $userRole. Please contact support.'),
+              backgroundColor: AppColors.error,
+            ),
           );
         }
       } else if (mounted && authProvider.errorMessage != null) {
@@ -165,7 +224,7 @@ class _LoginScreenState extends State<LoginScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Clear Saved Data'),
-        content: const Text('Are you sure you want to clear all saved login information? You will need to enter your credentials manually next time.'),
+        content: const Text('Are you sure you want to clear all saved login information?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -216,7 +275,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo
                       Container(
                         width: 100,
                         height: 100,
@@ -245,7 +303,26 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 40),
 
-                      // Saved info indicator
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.info_outline, size: 16, color: Colors.white),
+                            SizedBox(width: 8),
+                            Text(
+                              'Login as: School Admin • Teacher • Guardian',
+                              style: TextStyle(color: Colors.white, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+
                       if (_schoolRegNoController.text.isNotEmpty || _emailController.text.isNotEmpty)
                         Container(
                           margin: const EdgeInsets.only(bottom: 16),
@@ -280,7 +357,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         key: _formKey,
                         child: Column(
                           children: [
-                            // School Registration Number Field
                             Container(
                               height: 55,
                               decoration: BoxDecoration(
@@ -315,7 +391,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Email Field
                             Container(
                               height: 55,
                               decoration: BoxDecoration(
@@ -350,7 +425,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Password Field with show/hide
                             Container(
                               height: 55,
                               decoration: BoxDecoration(
@@ -396,7 +470,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Remember options
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8),
                               child: Column(
@@ -441,7 +514,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                             const SizedBox(height: 8),
 
-                            // Forgot Password
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
@@ -452,7 +524,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                             const SizedBox(height: 16),
 
-                            // Login Button
                             SizedBox(
                               width: double.infinity,
                               height: 50,

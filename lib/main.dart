@@ -1,9 +1,22 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'services/auth_provider.dart';
-import 'screens/splash_screen.dart';
+import 'services/notification_service.dart';
+import 'screens/login_screen.dart';
+import 'firebase_options.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Initialize notification service
+  await NotificationService().initialize();
+
   runApp(const MyApp());
 }
 
@@ -18,13 +31,16 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'EducatMobile',
-        theme: ThemeData(
-          primarySwatch: Colors.orange,
-          visualDensity: VisualDensity.adaptivePlatformDensity,
-          fontFamily: 'Roboto',
-        ),
-        home: const SplashScreen(),
         debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          fontFamily: 'Poppins',
+          appBarTheme: const AppBarTheme(
+            elevation: 0,
+            centerTitle: false,
+          ),
+        ),
+        home: const LoginScreen(),
       ),
     );
   }

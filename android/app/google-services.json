@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "969007208930",
+    "project_id": "educat-9121e",
+    "storage_bucket": "educat-9121e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:969007208930:android:d3ccf4ed92bba50d2a01bb",
+        "android_client_info": {
+          "package_name": "com.codeweb.educatmobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYJTDE9vLEfjXHm5w0OJohcl2PnXbKQaE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
