@@ -11,6 +11,470 @@ import '../screens/messages_screen.dart';
 import 'login_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/notification_service.dart';
+import 'dart:io' show Platform;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:network_info_plus/network_info_plus.dart';
+
+// ==================== CLOCK IN/OUT WIDGET ====================
+
+class ClockInOutWidget extends StatefulWidget {
+  final UserModel user;
+  final ApiService apiService;
+  final VoidCallback onStatusChanged;
+
+  const ClockInOutWidget({
+    super.key,
+    required this.user,
+    required this.apiService,
+    required this.onStatusChanged,
+  });
+
+  @override
+  State<ClockInOutWidget> createState() => _ClockInOutWidgetState();
+}
+
+class _ClockInOutWidgetState extends State<ClockInOutWidget> {
+  bool _isLoading = false;
+  bool _isClockedIn = false;
+  String? _clockInTime;
+  String? _clockOutTime;
+  String? _statusMessage;
+  bool _isLoadingStatus = true;
+
+  // Dynamically generate QR code value using actual school ID
+  String get _qrCodeValue =>
+      'SCHOOL_ATTENDANCE|${widget.user.schoolId}|${DateTime.now().millisecondsSinceEpoch}|${DateTime.now().millisecondsSinceEpoch.toString().substring(0, 8)}';
+
+  // Location values - should be obtained from GPS in production
+  double _latitude = 0.0;
+  double _longitude = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _getLocation();
+    _loadAttendanceStatus();
+  }
+
+  Future<void> _getLocation() async {
+    // In production, use geolocator package to get actual location
+    // For now, using placeholder values that should be replaced with actual GPS data
+    setState(() {
+      _latitude = 6.636814; // Replace with actual GPS latitude
+      _longitude = 3.514077; // Replace with actual GPS longitude
+    });
+  }
+
+  Future<void> _loadAttendanceStatus() async {
+    setState(() {
+      _isLoadingStatus = true;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now();
+    final dateKey = '${today.year}-${today.month}-${today.day}';
+    final clockInKey = 'clock_in_${widget.user.id}_$dateKey';
+    final clockOutKey = 'clock_out_${widget.user.id}_$dateKey';
+
+    _clockInTime = prefs.getString(clockInKey);
+    _clockOutTime = prefs.getString(clockOutKey);
+    _isClockedIn = _clockInTime != null && _clockOutTime == null;
+
+    try {
+      final result = await widget.apiService.getTeacherAttendanceStatus(
+        teacherId: widget.user.id,
+      );
+      if (result['success'] && mounted) {
+        final data = result['data'];
+        if (data != null) {
+          setState(() {
+            if (data['clockInTime'] != null) {
+              _clockInTime = data['clockInTime'];
+              prefs.setString(clockInKey, _clockInTime!);
+            }
+            if (data['clockOutTime'] != null) {
+              _clockOutTime = data['clockOutTime'];
+              prefs.setString(clockOutKey, _clockOutTime!);
+            }
+            _isClockedIn = _clockInTime != null && _clockOutTime == null;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading attendance status: $e');
+    }
+
+    setState(() {
+      _isLoadingStatus = false;
+    });
+  }
+
+  Future<void> _clockIn() async {
+    setState(() {
+      _isLoading = true;
+      _statusMessage = null;
+    });
+
+    final deviceInfo = await _getDeviceInfo();
+    final ipAddress = await _getIpAddress();
+
+    final result = await widget.apiService.clockIn(
+      teacherId: widget.user.id,
+      schoolId: widget.user.schoolId,
+      qrCodeValue: _qrCodeValue,
+      latitude: _latitude,
+      longitude: _longitude,
+      deviceModel: deviceInfo['model'] ?? 'Unknown',
+      appVersion: 'v1',
+      ipAddress: ipAddress,
+      userAgent: 'educat',
+    );
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (result['success'] && mounted) {
+      final now = DateTime.now();
+      final formattedTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateTime.now();
+      final dateKey = '${today.year}-${today.month}-${today.day}';
+      await prefs.setString('clock_in_${widget.user.id}_$dateKey', formattedTime);
+
+      setState(() {
+        _clockInTime = formattedTime;
+        _isClockedIn = true;
+        _statusMessage = '✅ Clocked in at $formattedTime';
+      });
+
+      widget.onStatusChanged();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Clocked in successfully at $formattedTime'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } else {
+      setState(() {
+        _statusMessage = '❌ ${result['message']}';
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${result['message']}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _clockOut() async {
+    setState(() {
+      _isLoading = true;
+      _statusMessage = null;
+    });
+
+    final result = await widget.apiService.clockOut(
+      schoolId: widget.user.schoolId,
+      teacherId: widget.user.id,
+    );
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (result['success'] && mounted) {
+      final now = DateTime.now();
+      final formattedTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateTime.now();
+      final dateKey = '${today.year}-${today.month}-${today.day}';
+      await prefs.setString('clock_out_${widget.user.id}_$dateKey', formattedTime);
+
+      setState(() {
+        _clockOutTime = formattedTime;
+        _isClockedIn = false;
+        _statusMessage = '✅ Clocked out at $formattedTime';
+      });
+
+      widget.onStatusChanged();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Clocked out successfully at $formattedTime'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } else {
+      setState(() {
+        _statusMessage = '❌ ${result['message']}';
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${result['message']}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<Map<String, String>> _getDeviceInfo() async {
+    final deviceInfoPlugin = DeviceInfoPlugin();
+    try {
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfoPlugin.androidInfo;
+        return {
+          'model': androidInfo.model,
+          'manufacturer': androidInfo.manufacturer,
+          'version': androidInfo.version.release,
+        };
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfoPlugin.iosInfo;
+        return {
+          'model': iosInfo.model,
+          'manufacturer': 'Apple',
+          'version': iosInfo.systemVersion,
+        };
+      }
+    } catch (e) {
+      print('Error getting device info: $e');
+    }
+    return {
+      'model': 'Unknown',
+      'manufacturer': 'Unknown',
+      'version': '1.0',
+    };
+  }
+
+  Future<String> _getIpAddress() async {
+    try {
+      final networkInfo = NetworkInfo();
+      final ip = await networkInfo.getWifiIP();
+      return ip ?? '0.0.0.0';
+    } catch (e) {
+      print('Error getting IP: $e');
+      return '0.0.0.0';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradient,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isClockedIn ? Icons.work_rounded : Icons.work_outline_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _isClockedIn ? 'Currently Clocked In' : 'Not Clocked In',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _isClockedIn
+                      ? AppColors.success.withOpacity(0.2)
+                      : AppColors.grey.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _isClockedIn ? 'ACTIVE' : 'OFF',
+                  style: TextStyle(
+                    color: _isClockedIn ? AppColors.success : Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (_clockInTime != null) ...[
+                Icon(Icons.login, color: Colors.white70, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'In: $_clockInTime',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+              if (_clockInTime != null && _clockOutTime != null) ...[
+                const SizedBox(width: 16),
+                Icon(Icons.logout, color: Colors.white70, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'Out: $_clockOutTime',
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+              if (_clockInTime == null) ...[
+                const Text(
+                  'Not clocked in today',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_isLoadingStatus)
+            const Center(
+              child: SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isLoading || _isClockedIn ? null : _clockIn,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _isLoading && !_isClockedIn
+                        ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primary,
+                      ),
+                    )
+                        : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.login_rounded,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Clock In',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _isLoading || !_isClockedIn ? null : _clockOut,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isClockedIn
+                          ? AppColors.error
+                          : AppColors.grey,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: _isLoading && _isClockedIn
+                        ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.logout_rounded,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Clock Out',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          if (_statusMessage != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _statusMessage!,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== TEACHER DASHBOARD ====================
 
 class TeacherDashboard extends StatefulWidget {
   final UserModel? user;
@@ -114,6 +578,15 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         }
       }
     };
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _subjectNameController.dispose();
+    _subjectDescriptionController.dispose();
+    _pageController.dispose();
+    super.dispose();
   }
 
   void _startAutoScroll() {
@@ -1503,6 +1976,18 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             children: [
               _buildHeader(responsive),
               const SizedBox(height: 16),
+
+              // ============ CLOCK IN/OUT WIDGET ============
+              ClockInOutWidget(
+                user: _currentUser,
+                apiService: _apiService,
+                onStatusChanged: () {
+                  // Refresh any data that depends on clock status
+                  print('Clock status changed');
+                },
+              ),
+              const SizedBox(height: 16),
+
               if (_classrooms.length > 1)
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -1873,9 +2358,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   // Screens based on index
   Widget _buildScreenForIndex(int index, ResponsiveData responsive) {
     switch (index) {
-    case 1: return _buildStudentsScreen(responsive);
-    case 2: return _buildAttendanceScreen(responsive);
-    case 3: return _buildResultsScreen(responsive);
+      case 1: return _buildStudentsScreen(responsive);
+      case 2: return _buildAttendanceScreen(responsive);
+      case 3: return _buildResultsScreen(responsive);
       case 4: return _buildMessagesScreen(responsive);
       case 5: return _buildMoreScreen(responsive);
       default: return _buildHomeScreen(responsive);

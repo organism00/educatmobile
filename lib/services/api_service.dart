@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
 import '../utils/jwt_decoder.dart';
@@ -7,6 +8,7 @@ class ApiService {
   static const String baseUrl = 'https://educat.codeweb.com.ng/api';
   static const String loginEndpoint = '/Login/Login';
   static const Duration timeout = Duration(seconds: 30);
+  late Dio _dio;
 
   // ==================== AUTHENTICATION ====================
 
@@ -508,6 +510,131 @@ class ApiService {
   }
 
 // ==================== TEACHER ENDPOINTS ====================
+
+  // Add these methods to your ApiService class
+
+  Future<Map<String, dynamic>> clockIn({
+    required String teacherId,
+    required String schoolId,
+    required String qrCodeValue,
+    required double latitude,
+    required double longitude,
+    required String deviceModel,
+    required String appVersion,
+    required String ipAddress,
+    required String userAgent,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/TeacherAttendance/ClockIn?teacherId=$teacherId',
+        data: {
+          'schoolId': schoolId,
+          'qrCodeValue': qrCodeValue,
+          'latitude': latitude,
+          'longitude': longitude,
+          'deviceModel': deviceModel,
+          'appVersion': appVersion,
+          'ipAddress': ipAddress,
+          'userAgent': userAgent,
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': response.data,
+          'message': 'Clock in successful',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to clock in: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> clockOut({
+    required String schoolId,
+    required String teacherId,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/TeacherAttendance/ClockOut?schoolId=$schoolId&teacherId=$teacherId',
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': response.data,
+          'message': 'Clock out successful',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to clock out: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
+    }
+  }
+
+// Get today's attendance status for a teacher
+  Future<Map<String, dynamic>> getTeacherAttendanceStatus({
+    required String teacherId,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/TeacherAttendance/Status?teacherId=$teacherId',
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': response.data,
+          'message': 'Attendance status retrieved',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to get attendance status: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
+    }
+  }
+
 
 // Get Teacher by ID
   Future<Map<String, dynamic>> getTeacherById({
@@ -2142,6 +2269,9 @@ class ApiService {
     }
   }
 
+
+
+
 // Get students owing in class by term
   Future<Map<String, dynamic>> getStudentsOwingInClassByTerm({
     required String token,
@@ -2218,6 +2348,9 @@ class ApiService {
         'message': 'Error: $e',
         'data': null,
       };
+
     }
+
   }
+
 }
