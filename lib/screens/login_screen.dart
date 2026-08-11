@@ -89,7 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
           fcmToken: fcmToken,
         );
 
-        // Subscribe to topics
         await notificationService.subscribeToTopic('all_users');
         await notificationService.subscribeToTopic(user.role.toLowerCase());
         await notificationService.subscribeToTopic('school_${user.schoolId}');
@@ -135,38 +134,24 @@ class _LoginScreenState extends State<LoginScreen> {
         final authToken = authProvider.token!;
         final userRole = user?.role ?? '';
 
-        // Register FCM token for push notifications
         await _registerFcmToken(user!, authToken);
 
-        print('User Role from JWT: $userRole');
-        print('isAdmin: ${user.isAdmin}');
-        print('isTeacher: ${user.isTeacher}');
-        print('isGuardian: ${user.isGuardian}');
-
-        // Route based on role
         if (userRole == 'SchoolAdmin') {
-          print('Navigating to Admin Dashboard');
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const AdminDashboard()),
           );
-        }
-        else if (userRole == 'Teacher') {
-          print('Navigating to Teacher Dashboard');
+        } else if (userRole == 'Teacher') {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => TeacherDashboard(user: user)),
           );
-        }
-        else if (userRole == 'Guardian') {
-          print('Navigating to Guardian Dashboard');
+        } else if (userRole == 'Guardian') {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const GuardianDashboard()),
           );
-        }
-        else {
-          print('Unknown role: $userRole');
+        } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Unknown user role: $userRole. Please contact support.'),
@@ -255,323 +240,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFF6B35), Color(0xFFF7931E), Color(0xFFFFB347)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Consumer<AuthProvider>(
-                builder: (context, authProvider, child) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 100,
-                        height: 100,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: Image.asset(
-                          'assets/images/educat.png',
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Icon(Icons.school, size: 60, color: Color(0xFFFF6B35)),
-                          ),
-                        ),
-                      ),
-
-                      const Text(
-                        'EducatMobile',
-                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Multi-School Management System',
-                        style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.9)),
-                      ),
-                      const SizedBox(height: 40),
-
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.info_outline, size: 16, color: Colors.white),
-                            SizedBox(width: 8),
-                            Text(
-                              'Login as: School Admin • Teacher • Guardian',
-                              style: TextStyle(color: Colors.white, fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      if (_schoolRegNoController.text.isNotEmpty || _emailController.text.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.info_outline, size: 16, color: Colors.white),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _buildSavedInfoText(),
-                                  style: const TextStyle(color: Colors.white, fontSize: 11),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: _clearSavedData,
-                                child: const Icon(Icons.close, size: 16, color: Colors.white70),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      Form(
-                        key: _formKey,
-                        child: Column(
-                          children: [
-                            Container(
-                              height: 55,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                              ),
-                              child: TextFormField(
-                                controller: _schoolRegNoController,
-                                validator: _validateSchoolRegNo,
-                                style: const TextStyle(color: Colors.black87, fontSize: 16),
-                                textCapitalization: TextCapitalization.characters,
-                                decoration: InputDecoration(
-                                  labelText: 'School Registration Number',
-                                  hintText: 'e.g., PS001',
-                                  prefixIcon: const Icon(Icons.business, color: Color(0xFFFF6B35)),
-                                  suffixIcon: _schoolRegNoController.text.isNotEmpty
-                                      ? IconButton(
-                                    icon: const Icon(Icons.clear, size: 18),
-                                    onPressed: () => _schoolRegNoController.clear(),
-                                  )
-                                      : null,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            Container(
-                              height: 55,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                              ),
-                              child: TextFormField(
-                                controller: _emailController,
-                                keyboardType: TextInputType.emailAddress,
-                                validator: _validateEmail,
-                                style: const TextStyle(color: Colors.black87, fontSize: 16),
-                                decoration: InputDecoration(
-                                  labelText: 'Email Address',
-                                  hintText: 'Enter your email',
-                                  prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFFF6B35)),
-                                  suffixIcon: _emailController.text.isNotEmpty
-                                      ? IconButton(
-                                    icon: const Icon(Icons.clear, size: 18),
-                                    onPressed: () => _emailController.clear(),
-                                  )
-                                      : null,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            Container(
-                              height: 55,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                              ),
-                              child: TextFormField(
-                                controller: _passwordController,
-                                obscureText: !_isPasswordVisible,
-                                validator: _validatePassword,
-                                style: const TextStyle(color: Colors.black87, fontSize: 16),
-                                decoration: InputDecoration(
-                                  labelText: 'Password',
-                                  hintText: 'Enter your password',
-                                  prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFFF6B35)),
-                                  suffixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (_passwordController.text.isNotEmpty)
-                                        IconButton(
-                                          icon: const Icon(Icons.clear, size: 18),
-                                          onPressed: () => _passwordController.clear(),
-                                        ),
-                                      IconButton(
-                                        icon: Icon(
-                                          _isPasswordVisible ? Icons.visibility_off : Icons.visibility,
-                                          color: Colors.grey,
-                                        ),
-                                        onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
-                                      ),
-                                    ],
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    children: [
-                                      Checkbox(
-                                        value: _rememberSchool,
-                                        onChanged: (value) => setState(() => _rememberSchool = value ?? true),
-                                        activeColor: Colors.white,
-                                        checkColor: const Color(0xFFFF6B35),
-                                        side: const BorderSide(color: Colors.white),
-                                      ),
-                                      const Expanded(
-                                        child: Text(
-                                          'Remember my school',
-                                          style: TextStyle(color: Colors.white, fontSize: 13),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  Row(
-                                    children: [
-                                      Checkbox(
-                                        value: _rememberMe,
-                                        onChanged: (value) => setState(() => _rememberMe = value ?? false),
-                                        activeColor: Colors.white,
-                                        checkColor: const Color(0xFFFF6B35),
-                                        side: const BorderSide(color: Colors.white),
-                                      ),
-                                      const Expanded(
-                                        child: Text(
-                                          'Remember me (save email & password)',
-                                          style: TextStyle(color: Colors.white, fontSize: 13),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            const SizedBox(height: 8),
-
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () => _showForgotPasswordDialog(),
-                                child: const Text('Forgot Password?', style: TextStyle(color: Colors.white)),
-                              ),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            SizedBox(
-                              width: double.infinity,
-                              height: 50,
-                              child: ElevatedButton(
-                                onPressed: authProvider.isLoading ? null : _handleLogin,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: const Color(0xFFFF6B35),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  elevation: 2,
-                                ),
-                                child: authProvider.isLoading
-                                    ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
-                                  ),
-                                )
-                                    : const Text('Login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _buildSavedInfoText() {
-    List<String> saved = [];
-    if (_schoolRegNoController.text.isNotEmpty) {
-      saved.add('School: ${_schoolRegNoController.text}');
-    }
-    if (_emailController.text.isNotEmpty) {
-      saved.add('Email: ${_emailController.text}');
-    }
-    return saved.join(' | ');
-  }
-
   void _showForgotPasswordDialog() {
     showDialog(
       context: context,
@@ -586,5 +254,468 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFFF6B35),
+              Color(0xFFF7931E),
+              Color(0xFFFFB347),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Consumer<AuthProvider>(
+                builder: (context, authProvider, child) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // App Logo with Animation
+                      TweenAnimationBuilder(
+                        tween: Tween<double>(begin: 0.0, end: 1.0),
+                        duration: const Duration(milliseconds: 800),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, value, child) {
+                          return Transform.scale(
+                            scale: value,
+                            child: child,
+                          );
+                        },
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(30),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(30),
+                            child: Image.asset(
+                              'assets/images/educat.png',
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) => const Center(
+                                child: Icon(
+                                  Icons.school_rounded,
+                                  size: 60,
+                                  color: Color(0xFFFF6B35),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Welcome Text
+                      const Text(
+                        'Welcome Back!',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Sign in to continue to EducatMobile',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.white.withOpacity(0.85),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Login Card
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 30,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            children: [
+                              // School Registration Number
+                              _buildTextField(
+                                controller: _schoolRegNoController,
+                                label: 'School Registration Number',
+                                hint: 'Enter school registration number',
+                                icon: Icons.business_outlined,
+                                validator: _validateSchoolRegNo,
+                                textCapitalization: TextCapitalization.characters,
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Email
+                              _buildTextField(
+                                controller: _emailController,
+                                label: 'Email Address',
+                                hint: 'Enter your email address',
+                                icon: Icons.email_outlined,
+                                validator: _validateEmail,
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Password
+                              _buildTextField(
+                                controller: _passwordController,
+                                label: 'Password',
+                                hint: 'Enter your password',
+                                icon: Icons.lock_outlined,
+                                validator: _validatePassword,
+                                obscureText: !_isPasswordVisible,
+                                isPassword: true,
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Forgot Password
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _showForgotPasswordDialog,
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  ),
+                                  child: Text(
+                                    'Forgot Password?',
+                                    style: TextStyle(
+                                      color: const Color(0xFFFF6B35),
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Remember Me Options
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Column(
+                                  children: [
+                                    _buildCheckbox(
+                                      value: _rememberSchool,
+                                      onChanged: (value) => setState(() => _rememberSchool = value ?? true),
+                                      label: 'Remember my school',
+                                    ),
+                                    _buildCheckbox(
+                                      value: _rememberMe,
+                                      onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                                      label: 'Remember me (save email & password)',
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Login Button
+                              SizedBox(
+                                width: double.infinity,
+                                height: 56,
+                                child: ElevatedButton(
+                                  onPressed: authProvider.isLoading ? null : _handleLogin,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFF6B35),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    elevation: 3,
+                                    shadowColor: const Color(0xFFFF6B35).withOpacity(0.4),
+                                  ),
+                                  child: authProvider.isLoading
+                                      ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 3,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                      : const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Login',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                      SizedBox(width: 8),
+                                      Icon(
+                                        Icons.arrow_forward_rounded,
+                                        size: 22,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              // Saved Credentials Indicator
+                              if (_schoolRegNoController.text.isNotEmpty || _emailController.text.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.grey[200]!),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline_rounded,
+                                        size: 18,
+                                        color: Colors.grey[600],
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _buildSavedInfoText(),
+                                          style: TextStyle(
+                                            color: Colors.grey[700],
+                                            fontSize: 12,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: _clearSavedData,
+                                        style: TextButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          minimumSize: const Size(40, 30),
+                                        ),
+                                        child: Text(
+                                          'Clear',
+                                          style: TextStyle(
+                                            color: AppColors.error,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Footer
+                      Column(
+                        children: [
+                          Text(
+                            '© 2024 EducatMobile',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Multi-School Management System',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.5),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required String? Function(String?) validator,
+    bool obscureText = false,
+    bool isPassword = false,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: TextFormField(
+        controller: controller,
+        obscureText: obscureText,
+        validator: validator,
+        style: const TextStyle(
+          fontSize: 15,
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+        textCapitalization: textCapitalization,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+          hintText: hint,
+          hintStyle: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 14,
+          ),
+          prefixIcon: Icon(
+            icon,
+            color: const Color(0xFFFF6B35),
+            size: 22,
+          ),
+          suffixIcon: isPassword
+              ? IconButton(
+            icon: Icon(
+              _isPasswordVisible ? Icons.visibility_off : Icons.visibility,
+              color: Colors.grey[400],
+              size: 20,
+            ),
+            onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+          )
+              : controller.text.isNotEmpty
+              ? IconButton(
+            icon: Icon(
+              Icons.clear_rounded,
+              color: Colors.grey[400],
+              size: 20,
+            ),
+            onPressed: () => controller.clear(),
+          )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: const Color(0xFFFF6B35),
+              width: 2,
+            ),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: Colors.red[400]!,
+              width: 2,
+            ),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: Colors.red[400]!,
+              width: 2,
+            ),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          errorStyle: TextStyle(
+            color: Colors.red[400],
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckbox({
+    required bool value,
+    required Function(bool?) onChanged,
+    required String label,
+  }) {
+    return Row(
+      children: [
+        Transform.scale(
+          scale: 0.9,
+          child: Checkbox(
+            value: value,
+            onChanged: onChanged,
+            activeColor: const Color(0xFFFF6B35),
+            checkColor: Colors.white,
+            side: BorderSide(
+              color: Colors.grey[400]!,
+              width: 2,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _buildSavedInfoText() {
+    List<String> saved = [];
+    if (_schoolRegNoController.text.isNotEmpty) {
+      saved.add('School: ${_schoolRegNoController.text}');
+    }
+    if (_emailController.text.isNotEmpty) {
+      saved.add('Email: ${_emailController.text}');
+    }
+    return saved.join(' | ');
   }
 }

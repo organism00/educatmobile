@@ -5,10 +5,10 @@ import '../models/user_model.dart';
 import '../utils/jwt_decoder.dart';
 
 class ApiService {
-  static const String baseUrl = 'https://educat.codeweb.com.ng/api';
+  //static const String baseUrl = 'https://educat.codeweb.com.ng/api';
+  static const String baseUrl = 'https://scrmapi-lpkm.onrender.com/api';
   static const String loginEndpoint = '/Login/Login';
   static const Duration timeout = Duration(seconds: 30);
-  late Dio _dio;
 
   // ==================== AUTHENTICATION ====================
 
@@ -513,6 +513,12 @@ class ApiService {
 
   // Add these methods to your ApiService class
 
+  // ==================== TEACHER ATTENDANCE ENDPOINTS (UPDATED) ====================
+
+// CLOCK IN - Updated to use http instead of Dio
+  // ==================== TEACHER ATTENDANCE ENDPOINTS ====================
+
+// CLOCK IN - Complete working version
   Future<Map<String, dynamic>> clockIn({
     required String teacherId,
     required String schoolId,
@@ -525,9 +531,27 @@ class ApiService {
     required String userAgent,
   }) async {
     try {
-      final response = await _dio.post(
-        '$baseUrl/TeacherAttendance/ClockIn?teacherId=$teacherId',
-        data: {
+      final url = Uri.parse('$baseUrl/TeacherAttendance/ClockIn?teacherId=$teacherId');
+      print('📤 Clock In Request');
+      print('URL: $url');
+      print('Payload: ${jsonEncode({
+        'schoolId': schoolId,
+        'qrCodeValue': qrCodeValue,
+        'latitude': latitude,
+        'longitude': longitude,
+        'deviceModel': deviceModel,
+        'appVersion': appVersion,
+        'ipAddress': ipAddress,
+        'userAgent': userAgent,
+      })}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
           'schoolId': schoolId,
           'qrCodeValue': qrCodeValue,
           'latitude': latitude,
@@ -536,104 +560,186 @@ class ApiService {
           'appVersion': appVersion,
           'ipAddress': ipAddress,
           'userAgent': userAgent,
-        },
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
+        }),
+      ).timeout(timeout);
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return {
-          'success': true,
-          'data': response.data,
-          'message': 'Clock in successful',
-        };
-      } else {
+      print('📥 Clock In Response');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.body.isEmpty) {
         return {
           'success': false,
-          'message': 'Failed to clock in: ${response.statusCode}',
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      // Check if response indicates success
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        // Check if there's a status field in the response
+        if (responseData['status'] == true || responseData['status'] == 'true') {
+          return {
+            'success': true,
+            'data': responseData['data'],
+            'message': responseData['responseMessage'] ?? 'Clock in successful',
+          };
+        } else {
+          // Status is false or not present
+          return {
+            'success': false,
+            'message': responseData['responseMessage'] ?? 'Clock in failed',
+            'data': responseData['data'],
+          };
+        }
+      } else {
+        // Non-200 status code
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to clock in (Status ${response.statusCode})',
+          'data': responseData['data'],
         };
       }
     } catch (e) {
+      print('❌ Clock In Error: $e');
       return {
         'success': false,
-        'message': 'Error: $e',
+        'message': 'Error: ${e.toString()}',
       };
     }
   }
 
+// CLOCK OUT - Updated to match the same pattern
   Future<Map<String, dynamic>> clockOut({
     required String schoolId,
     required String teacherId,
   }) async {
     try {
-      final response = await _dio.post(
-        '$baseUrl/TeacherAttendance/ClockOut?schoolId=$schoolId&teacherId=$teacherId',
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
+      final url = Uri.parse('$baseUrl/TeacherAttendance/ClockOut?schoolId=$schoolId&teacherId=$teacherId');
+      print('📤 Clock Out Request');
+      print('URL: $url');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ).timeout(timeout);
+
+      print('📥 Clock Out Response');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        return {
-          'success': true,
-          'data': response.data,
-          'message': 'Clock out successful',
-        };
+        if (responseData['status'] == true || responseData['status'] == 'true') {
+          return {
+            'success': true,
+            'data': responseData['data'],
+            'message': responseData['responseMessage'] ?? 'Clock out successful',
+          };
+        } else {
+          return {
+            'success': false,
+            'message': responseData['responseMessage'] ?? 'Clock out failed',
+            'data': responseData['data'],
+          };
+        }
       } else {
         return {
           'success': false,
-          'message': 'Failed to clock out: ${response.statusCode}',
+          'message': responseData['responseMessage'] ?? 'Failed to clock out (Status ${response.statusCode})',
         };
       }
     } catch (e) {
+      print('❌ Clock Out Error: $e');
       return {
         'success': false,
-        'message': 'Error: $e',
+        'message': 'Error: ${e.toString()}',
       };
     }
   }
 
-// Get today's attendance status for a teacher
+// GET TEACHER ATTENDANCE STATUS
   Future<Map<String, dynamic>> getTeacherAttendanceStatus({
     required String teacherId,
   }) async {
     try {
-      final response = await _dio.get(
-        '$baseUrl/TeacherAttendance/Status?teacherId=$teacherId',
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-        ),
-      );
+      final url = Uri.parse('$baseUrl/TeacherAttendance/Status?teacherId=$teacherId');
+      print('📤 Get Attendance Status');
+      print('URL: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ).timeout(timeout);
+
+      print('📥 Attendance Status Response');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'isClockedIn': false,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'data': response.data,
-          'message': 'Attendance status retrieved',
-        };
+        if (responseData['status'] == true || responseData['status'] == 'true') {
+          // Extract attendance status from data
+          final data = responseData['data'];
+          final isClockedIn = data?['isClockedIn'] ?? data?['isClockedIn'] ?? false;
+
+          return {
+            'success': true,
+            'data': data,
+            'isClockedIn': isClockedIn,
+            'message': responseData['responseMessage'] ?? 'Attendance status retrieved',
+          };
+        } else {
+          return {
+            'success': false,
+            'message': responseData['responseMessage'] ?? 'Failed to get attendance status',
+            'isClockedIn': false,
+          };
+        }
       } else {
         return {
           'success': false,
-          'message': 'Failed to get attendance status: ${response.statusCode}',
+          'message': responseData['responseMessage'] ?? 'Failed to get attendance status (Status ${response.statusCode})',
+          'isClockedIn': false,
         };
       }
     } catch (e) {
+      print('❌ Get Attendance Status Error: $e');
       return {
         'success': false,
-        'message': 'Error: $e',
+        'message': 'Error: ${e.toString()}',
+        'isClockedIn': false,
       };
     }
   }
+
+// GET TEACHER ATTENDANCE STATUS - Updated to use http instead of Dio
+
+// Get today's attendance status for a teacher
 
 
 // Get Teacher by ID
@@ -2229,6 +2335,421 @@ class ApiService {
     }
   }
 
+  // Add this method to your ApiService class
+
+// ==================== STUDENT DISCOUNT ENDPOINTS ====================
+
+  /// Get discounts for a specific student
+  Future<Map<String, dynamic>> getStudentDiscounts({
+    required String token,
+    required String studentId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse('$baseUrl/StudentDiscount/GetDiscountsByStudent/$studentId');
+      print('📤 Fetching student discounts from: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Discounts Response');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'discounts': [],
+          'hasDiscounts': false,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        // Get the discounts data (might be null or empty)
+        final data = responseData['data'];
+        final List<dynamic> discounts = data is List ? data : [];
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Discounts retrieved successfully',
+          'discounts': discounts,
+          'hasDiscounts': discounts.isNotEmpty,
+          'discountCount': discounts.length,
+          'rawData': responseData,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch discounts',
+          'discounts': [],
+          'hasDiscounts': false,
+          'discountCount': 0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get student discounts error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'discounts': [],
+        'hasDiscounts': false,
+        'discountCount': 0,
+      };
+    }
+  }
+
+  // Add this method to your ApiService class
+
+  /// Get class fee for a specific term
+
+  /// Get class fee for a specific term
+  Future<Map<String, dynamic>> getClassFeeForTerm({
+    required String token,
+    required String classId,
+    required String sessionId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      // URL encode the sessionId to handle special characters like '/'
+      final encodedSessionId = Uri.encodeComponent(sessionId);
+      final url = Uri.parse('$baseUrl/SchoolFee/GetClassFeeForTerm?classId=$classId&sessionId=$encodedSessionId');
+
+      print('📤 Fetching class fee from: $url');
+      print('📤 ClassId: $classId');
+      print('📤 SessionId: $sessionId');
+      print('📤 Encoded SessionId: $encodedSessionId');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Class Fee Response Status: ${response.statusCode}');
+      print('📥 Class Fee Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'fee': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+
+      // Check for validation errors
+      if (httpStatus == 400 && responseData['errors'] != null) {
+        final errors = responseData['errors'];
+        String errorMessage = 'Validation error: ';
+        errors.forEach((key, value) {
+          errorMessage += '$key: ${value.join(', ')} ';
+        });
+        print('❌ Validation error: $errorMessage');
+        return {
+          'success': false,
+          'message': errorMessage,
+          'fee': 0.0,
+        };
+      }
+
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final double fee = (responseData['data'] as num?)?.toDouble() ?? 0.0;
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Class fee retrieved successfully',
+          'fee': fee,
+          'data': responseData['data'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch class fee',
+          'fee': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get class fee error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'fee': 0.0,
+      };
+    }
+  }
+
+  /// Get student fee amount
+  Future<Map<String, dynamic>> getStudentFee({
+    required String token,
+    required String studentId,
+    required String sessionId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Student/GetStudentFee?studentId=$studentId&sessionId=$sessionId');
+      print('📤 Fetching student fee from: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Fee Response Status: ${response.statusCode}');
+      print('📥 Fee Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'fee': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final data = responseData['data'];
+        final double fee = (data?['fee'] ?? data?['amount'] ?? 0.0).toDouble();
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Fee retrieved successfully',
+          'fee': fee,
+          'data': data,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch fee',
+          'fee': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get student fee error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'fee': 0.0,
+      };
+    }
+  }
+  /// Get discounted fee for a student
+  Future<Map<String, dynamic>> getDiscountedFee({
+    required String token,
+    required String studentId,
+    required double originalFee,
+    required String sessionId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse(
+          '$baseUrl/StudentDiscount/GetDiscountedFee?studentId=$studentId&originalFee=$originalFee&sessionId=$sessionId'
+      );
+      print('📤 Fetching discounted fee from: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Discounted Fee Response Status: ${response.statusCode}');
+      print('📥 Discounted Fee Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'discountedFee': originalFee,
+          'originalFee': originalFee,
+          'discountAmount': 0,
+          'hasDiscount': false,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final data = responseData['data'];
+        final double discountedFee = (data?['discountedFee'] ?? originalFee).toDouble();
+        final double discountAmount = (data?['discountAmount'] ?? 0).toDouble();
+        final bool hasDiscount = data?['hasDiscount'] ?? false;
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Discount applied successfully',
+          'discountedFee': discountedFee,
+          'originalFee': originalFee,
+          'discountAmount': discountAmount,
+          'hasDiscount': hasDiscount,
+          'discountDetails': data,
+          'rawData': responseData,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to calculate discounted fee',
+          'discountedFee': originalFee,
+          'originalFee': originalFee,
+          'discountAmount': 0,
+          'hasDiscount': false,
+        };
+      }
+    } catch (e) {
+      print('❌ Get discounted fee error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'discountedFee': originalFee,
+        'originalFee': originalFee,
+        'discountAmount': 0,
+        'hasDiscount': false,
+      };
+    }
+  }
+
+  /// Initiate school fee payment
+  Future<Map<String, dynamic>> initiateSchoolFeePayment({
+    required String token,
+    required String studentId,
+    required String schoolId,
+    required String guardianId,
+    required double amount,
+    required String customerEmail,
+    required String gateway,
+    required String redirectUrl,
+    required String callbackUrl,
+    required String classroomId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse('$baseUrl/Payment/InitiateSchoolFeeGatewayPayment');
+      print('📤 Initiating payment at: $url');
+
+      final requestBody = {
+        'studentId': studentId,
+        'schoolId': schoolId,
+        'guardianId': guardianId,
+        'amount': amount,
+        'customerEmail': customerEmail,
+        'gateway': gateway,
+        'redirectUrl': redirectUrl,
+        'callbackUrl': callbackUrl,
+        'classroomId': classroomId,
+      };
+
+      print('📤 Payment Request Body: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 Payment Response Status: ${response.statusCode}');
+      print('📥 Payment Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final data = responseData['data'];
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Payment initialized successfully',
+          'data': data,
+          'checkoutUrl': data?['checkoutUrl'],
+          'reference': data?['reference'],
+          'gateway': data?['gateway'],
+          'rawData': responseData,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to initiate payment',
+        };
+      }
+    } catch (e) {
+      print('❌ Initiate payment error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
 // Get total amount paid in class by term
   Future<Map<String, dynamic>> getTotalAmountPaidInClassByTerm({
     required String token,
@@ -2350,6 +2871,7 @@ class ApiService {
       };
 
     }
+
 
   }
 

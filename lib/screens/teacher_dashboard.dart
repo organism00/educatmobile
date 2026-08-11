@@ -94,7 +94,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
             }
             if (data['clockOutTime'] != null) {
               _clockOutTime = data['clockOutTime'];
-              prefs.setString(clockOutKey, _clockOutTime!);
+              prefs. setString(clockOutKey, _clockOutTime!);
             }
             _isClockedIn = _clockInTime != null && _clockOutTime == null;
           });

@@ -1,7 +1,10 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'services/auth_provider.dart';
+import 'services/discount_provider.dart';
+import 'services/fee_provider.dart';
 import 'services/notification_service.dart';
 import 'screens/login_screen.dart';
 import 'firebase_options.dart';
@@ -28,6 +31,8 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => DiscountProvider()),
+        ChangeNotifierProvider(create: (_) => FeeProvider()),
       ],
       child: MaterialApp(
         title: 'EducatMobile',

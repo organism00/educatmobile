@@ -29,6 +29,17 @@ android {
         multiDexEnabled = true
     }
 
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
     // No signingConfigs needed for debug builds!
 }
 
@@ -38,4 +49,7 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.biometric:biometric:1.1.0")
 }
+

@@ -4,11 +4,16 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/user_model.dart';
 import '../models/result_model.dart';
+import '../models/discount_model.dart';
 import '../services/auth_provider.dart';
 import '../services/api_service.dart';
+import '../services/discount_provider.dart';
+import '../services/fee_provider.dart';
 import '../utils/app_colors.dart';
 import '../screens/conversation_screen.dart';
 import '../screens/messages_screen.dart';
+import '../screens/student_discount_screen.dart';
+import '../screens/fee_payment_screen.dart';
 import 'login_screen.dart';
 
 class GuardianDashboard extends StatefulWidget {
@@ -91,6 +96,12 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
   void _loadUserData() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     _currentUser = authProvider.currentUser!;
+
+    // Debug: Print user session info
+    print('👤 Current User: ${_currentUser.name}');
+    print('📅 Session ID: ${_currentUser.sessionId}');
+    print('📚 Term: ${_currentUser.term}');
+    print('🏫 School ID: ${_currentUser.schoolId}');
   }
 
   Future<void> _fetchUnreadMessages() async {
@@ -112,6 +123,29 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     }
   }
 
+  // Helper method to get session ID
+  String _getCurrentSessionId() {
+    // Try to get session ID from current user
+    String sessionId = _currentUser.sessionId ?? '';
+
+    if (sessionId.isEmpty) {
+      // Try to get from user model's sessionId
+      sessionId = _currentUser.sessionId ?? '';
+    }
+
+    if (sessionId.isEmpty) {
+      // Default to current academic year
+      final now = DateTime.now();
+      final year = now.year;
+      final nextYear = year + 1;
+      sessionId = '$year/$nextYear';
+      print('⚠️ Using default session ID: $sessionId');
+    }
+
+    print('📅 Final Session ID: $sessionId');
+    return sessionId;
+  }
+
   Future<void> _fetchDashboardData() async {
     setState(() {
       _isLoading = true;
@@ -129,24 +163,85 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     }
 
     try {
+      print('🔍 Step 1: Fetching students...');
       final studentsResult = await _apiService.getGuardianStudents(
         token: token,
         guardianId: _currentUser.id,
       ).timeout(const Duration(seconds: 30));
 
       if (studentsResult['success'] && mounted) {
+        print('✅ Step 2: Students fetched successfully');
         final studentsData = studentsResult['data'] as List? ?? [];
 
-        final List<Map<String, dynamic>> mappedPupils = studentsData.map((student) {
+        final List<Map<String, dynamic>> mappedPupils = [];
+        final String sessionId = _getCurrentSessionId();
+
+        for (var student in studentsData) {
           final guardian = student['guardian'];
           final teacher = student['teacher'];
+          final classroom = student['classroom'];
+          final studentId = student['studentId'] ?? '';
+          final classroomId = student['classroomId'] ?? '';
 
-          return {
-            'id': student['studentId'] ?? '',
+          // Extract fee from student data
+          double feeAmount = 0.0;
+
+          // Check various possible fee locations
+          if (student['fee'] != null) {
+            feeAmount = (student['fee'] as num?)?.toDouble() ?? 0.0;
+          } else if (classroom != null) {
+            feeAmount = (classroom['fee'] as num?)?.toDouble() ??
+                (classroom['amount'] as num?)?.toDouble() ??
+                (classroom['feeAmount'] as num?)?.toDouble() ??
+                (classroom['schoolFee'] as num?)?.toDouble() ??
+                0.0;
+          }
+
+          // If fee is still 0, fetch class fee for term
+          if (feeAmount == 0.0 && classroomId.isNotEmpty && token != null && sessionId.isNotEmpty) {
+            try {
+              print('🔍 Fetching class fee for classroom: $classroomId with session: $sessionId');
+              final feeResult = await _apiService.getClassFeeForTerm(
+                token: token,
+                classId: classroomId,
+                sessionId: sessionId,
+              );
+              if (feeResult['success'] && feeResult['fee'] > 0) {
+                feeAmount = feeResult['fee'];
+                print('💰 Class fee fetched: $feeAmount');
+              } else {
+                print('⚠️ Class fee fetch failed: ${feeResult['message']}');
+              }
+            } catch (e) {
+              print('⚠️ Error fetching class fee: $e');
+            }
+          }
+
+          // If still 0, try student fee endpoint as fallback
+          if (feeAmount == 0.0 && studentId.isNotEmpty && token != null && sessionId.isNotEmpty) {
+            try {
+              final feeResult = await _apiService.getStudentFee(
+                token: token,
+                studentId: studentId,
+                sessionId: sessionId,
+              );
+              if (feeResult['success'] && feeResult['fee'] > 0) {
+                feeAmount = feeResult['fee'];
+                print('💰 Student fee fetched separately: $feeAmount');
+              }
+            } catch (e) {
+              print('⚠️ Error fetching student fee separately: $e');
+            }
+          }
+
+          print('💰 Student: ${student['firstname']} ${student['lastname']}, Fee: $feeAmount');
+
+          mappedPupils.add({
+            'id': studentId,
             'name': '${student['firstname'] ?? ''} ${student['lastname'] ?? ''}'.trim(),
-            'class': student['classroom']?['name'] ?? student['classroomId'] ?? 'N/A',
-            'classroomId': student['classroomId'] ?? '',
-            'classroomName': student['classroom']?['name'] ?? 'N/A',
+            'class': classroom?['name'] ?? student['classroomId'] ?? 'N/A',
+            'classroomId': classroomId,
+            'classroomName': classroom?['name'] ?? 'N/A',
             'teacherId': teacher?['teacherId'] ?? '',
             'teacherName': teacher != null
                 ? '${teacher['firstname'] ?? ''} ${teacher['lastname'] ?? ''}'.trim()
@@ -154,25 +249,45 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
             'teacherEmail': teacher?['email'] ?? 'Not available',
             'teacherPhone': teacher?['phone'] ?? 'Not available',
             'feeStatus': 'Pending',
-            'feeAmount': 0.0,
+            'feeAmount': feeAmount,
             'averageScore': 0,
             'attendance': 0,
             'admissionNo': student['studentNo'] ?? '',
-          };
-        }).toList();
+          });
+        }
 
         setState(() {
           _pupils = mappedPupils;
           _filteredPupils = List.from(mappedPupils);
         });
 
+        print('✅ Step 3: Pupils mapped: ${_pupils.length}');
+
+        // Print fee summary
+        _pupils.forEach((pupil) {
+          print('📊 ${pupil['name']}: Fee = ${pupil['feeAmount']}');
+        });
+
+        // Load essential data first
+        print('🔍 Step 4: Fetching wallet and account...');
         await _fetchWalletAndAccount(token);
+
+        print('🔍 Step 5: Fetching loan data...');
         await _fetchLoanData(token);
+
+        print('🔍 Step 6: Fetching assignments...');
         await _fetchAssignments(token);
 
-        setState(() {
-          _isLoading = false;
-        });
+        // Load discounts in the background
+        print('🔍 Step 7: Fetching discounts in background...');
+        _fetchDiscountsForAllPupils(token);
+
+        print('✅ Dashboard loaded successfully');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       } else if (mounted) {
         setState(() {
           _errorMessage = studentsResult['message'] ?? 'Failed to load students data';
@@ -180,13 +295,45 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
         });
       }
     } catch (e) {
-      print('Error fetching dashboard data: $e');
+      print('❌ Error fetching dashboard data: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Network error. Please check your connection.';
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _fetchDiscountsForAllPupils(String token) async {
+    try {
+      final discountProvider = Provider.of<DiscountProvider>(context, listen: false);
+
+      if (_pupils.isEmpty) {
+        print('ℹ️ No pupils to fetch discounts for');
+        return;
+      }
+
+      print('🔍 Fetching discounts for ${_pupils.length} pupils');
+
+      final futures = _pupils.map((pupil) async {
+        final studentId = pupil['id']?.toString();
+        if (studentId != null && studentId.isNotEmpty) {
+          try {
+            await discountProvider.fetchStudentDiscounts(
+              token: token,
+              studentId: studentId,
+            );
+          } catch (e) {
+            print('⚠️ Error fetching discounts for student $studentId: $e');
+          }
+        }
+      }).toList();
+
+      await Future.wait(futures, eagerError: false);
+      print('✅ All discounts fetched');
+    } catch (e) {
+      print('⚠️ Error in _fetchDiscountsForAllPupils: $e');
     }
   }
 
@@ -337,6 +484,195 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     setState(() {
       _isRefreshing = false;
     });
+  }
+
+  // ==================== FEE PAYMENT METHODS ====================
+
+  Future<void> _payFeesForPupil(Map<String, dynamic> pupil) async {
+    final studentId = pupil['id']?.toString();
+    final classroomId = pupil['classroomId']?.toString();
+    final studentName = pupil['name'] ?? 'Student';
+    final studentClass = pupil['class'] ?? 'N/A';
+
+    // Get current fee amount
+    double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+
+    print('💰 Pay fee for: $studentName');
+    print('💰 Current fee amount: $feeAmount');
+    print('💰 Student ID: $studentId');
+    print('💰 Classroom ID: $classroomId');
+
+    if (studentId == null || studentId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Student ID not available'), backgroundColor: AppColors.warning),
+      );
+      return;
+    }
+
+    if (classroomId == null || classroomId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Classroom ID not available'), backgroundColor: AppColors.warning),
+      );
+      return;
+    }
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    final String sessionId = _getCurrentSessionId();
+
+    // If fee is 0 or we want to refresh it, fetch from API
+    try {
+      if (token != null && sessionId.isNotEmpty) {
+        print('🔍 Fetching class fee from API with session: $sessionId');
+
+        // First try: Get class fee for term
+        final feeResult = await _apiService.getClassFeeForTerm(
+          token: token,
+          classId: classroomId,
+          sessionId: sessionId,
+        );
+
+        if (feeResult['success'] && feeResult['fee'] > 0) {
+          feeAmount = feeResult['fee'];
+          print('💰 Class fee fetched: $feeAmount');
+
+          // Update the pupil's fee in the list
+          setState(() {
+            final index = _pupils.indexWhere((p) => p['id'] == studentId);
+            if (index != -1) {
+              _pupils[index]['feeAmount'] = feeAmount;
+              _filteredPupils[index]['feeAmount'] = feeAmount;
+            }
+          });
+        } else {
+          print('⚠️ Failed to fetch class fee: ${feeResult['message']}');
+
+          // Try student fee endpoint as fallback
+          print('🔍 Trying student fee endpoint...');
+          final studentFeeResult = await _apiService.getStudentFee(
+            token: token,
+            studentId: studentId,
+            sessionId: sessionId,
+          );
+
+          if (studentFeeResult['success'] && studentFeeResult['fee'] > 0) {
+            feeAmount = studentFeeResult['fee'];
+            print('💰 Student fee fetched: $feeAmount');
+
+            // Update the pupil's fee in the list
+            setState(() {
+              final index = _pupils.indexWhere((p) => p['id'] == studentId);
+              if (index != -1) {
+                _pupils[index]['feeAmount'] = feeAmount;
+                _filteredPupils[index]['feeAmount'] = feeAmount;
+              }
+            });
+          } else {
+            print('⚠️ Failed to fetch student fee: ${studentFeeResult['message']}');
+          }
+        }
+      } else {
+        print('⚠️ Cannot fetch fee: token or sessionId is empty');
+        print('Token: ${token != null ? "Present" : "Missing"}');
+        print('SessionId: $sessionId');
+      }
+    } catch (e) {
+      print('⚠️ Error fetching fee: $e');
+    } finally {
+      // Close loading dialog
+      Navigator.pop(context);
+    }
+
+    // Check if we have a valid fee
+    if (feeAmount <= 0) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No Fee Available', style: TextStyle(color: AppColors.warning)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.info_outline, size: 48, color: AppColors.warning),
+              const SizedBox(height: 16),
+              Text('No fee amount has been set for $studentName.'),
+              const SizedBox(height: 12),
+              const Text('Please contact the school administrator to set the fee amount.'),
+              const SizedBox(height: 8),
+              Text(
+                'Classroom ID: $classroomId\nSession: $sessionId',
+                style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                // Retry fetching fee
+                _payFeesForPupil(pupil);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Navigate to payment screen with the fee
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FeePaymentScreen(
+          studentId: studentId,
+          studentName: studentName,
+          studentClass: studentClass,
+          classroomId: classroomId,
+          originalFee: feeAmount,
+          sessionId: sessionId,
+        ),
+      ),
+    );
+  }
+
+  // ==================== DISCOUNT METHODS ====================
+
+  void _showStudentDiscounts(Map<String, dynamic> pupil) {
+    final studentId = pupil['id']?.toString();
+    if (studentId == null || studentId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Student ID not available'), backgroundColor: AppColors.warning),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StudentDiscountScreen(
+          studentId: studentId,
+          studentName: pupil['name'],
+          studentClass: pupil['class'],
+          admissionNo: pupil['admissionNo'],
+        ),
+      ),
+    );
   }
 
   // ==================== PHONE CALL METHOD ====================
@@ -528,6 +864,9 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
         pupil['teacherPhone'] != 'N/A' &&
         pupil['teacherPhone'] != 'Not available';
 
+    // Get current fee
+    double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -578,6 +917,11 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                     const SizedBox(height: 8),
                     _buildDetailRow('Admission No', pupil['admissionNo'], isSmallScreen: isSmallScreen),
                     _buildDetailRow('Class', pupil['class'], isSmallScreen: isSmallScreen),
+                    _buildDetailRow(
+                      'Fee',
+                      feeAmount > 0 ? '₦${feeAmount.toStringAsFixed(2)}' : 'Not Set',
+                      isSmallScreen: isSmallScreen,
+                    ),
                   ],
                 ),
               ),
@@ -610,6 +954,32 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
+          if (feeAmount > 0)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _payFeesForPupil(pupil);
+              },
+              icon: const Icon(Icons.payment, size: 18),
+              label: const Text('Pay Fees'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+          if (feeAmount <= 0)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _payFeesForPupil(pupil);
+              },
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Fetch Fee'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.info,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
@@ -710,7 +1080,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -750,8 +1119,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                     ),
                   ),
                   const SizedBox(height: 12),
-
-                  // Summary Cards - Responsive Grid
                   if (isSmallScreen)
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -781,10 +1148,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                             studentResult.attendancePercentage >= 75 ? AppColors.success : AppColors.warning)),
                       ],
                     ),
-
                   const SizedBox(height: 12),
-
-                  // Subjects Table
                   Expanded(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -837,10 +1201,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  // Remarks
                   if (studentResult.teacherRemark.isNotEmpty && studentResult.teacherRemark != 'No remark')
                     Container(
                       padding: const EdgeInsets.all(8),
@@ -866,7 +1227,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                         ],
                       ),
                     ),
-
                   if (studentResult.principalRemark.isNotEmpty && studentResult.principalRemark != 'No remark')
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -895,10 +1255,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                         ),
                       ),
                     ),
-
                   const SizedBox(height: 12),
-
-                  // Action Buttons
                   Row(
                     children: [
                       Expanded(
@@ -1469,15 +1826,66 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     );
   }
 
-  // ==================== FEE PAYMENT METHODS ====================
+  // ==================== FEE PAYMENT SCREEN ====================
 
-  void _showFeesScreen() {
+  void _showFeesScreen() async {
     if (_pupils.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
       );
       return;
     }
+
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    final String sessionId = _getCurrentSessionId();
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+
+    // Fetch fees for all pupils
+    List<Map<String, dynamic>> updatedPupils = List.from(_pupils);
+
+    for (var i = 0; i < updatedPupils.length; i++) {
+      final pupil = updatedPupils[i];
+      final classroomId = pupil['classroomId']?.toString();
+      final studentId = pupil['id']?.toString();
+      double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+
+      // If fee is 0, try to fetch it
+      if (feeAmount <= 0 && classroomId != null && classroomId.isNotEmpty && token != null && sessionId.isNotEmpty) {
+        try {
+          final feeResult = await _apiService.getClassFeeForTerm(
+            token: token,
+            classId: classroomId,
+            sessionId: sessionId,
+          );
+
+          if (feeResult['success'] && feeResult['fee'] > 0) {
+            feeAmount = feeResult['fee'];
+            updatedPupils[i]['feeAmount'] = feeAmount;
+            print('💰 Fee fetched for ${pupil['name']}: $feeAmount');
+          }
+        } catch (e) {
+          print('⚠️ Error fetching fee for ${pupil['name']}: $e');
+        }
+      }
+    }
+
+    // Update the pupils list
+    setState(() {
+      _pupils = updatedPupils;
+      _filteredPupils = List.from(_pupils);
+    });
+
+    // Close loading dialog
+    Navigator.pop(context);
 
     showModalBottomSheet(
       context: context,
@@ -1502,66 +1910,91 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
               Expanded(
                 child: ListView(
                   controller: scrollController,
-                  children: _pupils.map((pupil) => ListTile(
-                    dense: true,
-                    title: Text(pupil['name'] as String, style: const TextStyle(fontSize: 14)),
-                    subtitle: Text('Class: ${pupil['class']}', style: const TextStyle(fontSize: 12)),
-                    trailing: Text(
-                      '₦${(pupil['feeAmount'] as double).toStringAsFixed(2)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 13),
-                    ),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _payFeesForPupil(pupil);
-                    },
-                  )).toList(),
+                  children: _pupils.map((pupil) {
+                    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+                    final hasFee = feeAmount > 0;
+
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: isSmallScreen ? 18 : 20,
+                        backgroundColor: hasFee ? AppColors.primary.withOpacity(0.1) : AppColors.grey.withOpacity(0.1),
+                        child: Text(
+                          (pupil['name'] as String)[0].toUpperCase(),
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 12 : 14,
+                            color: hasFee ? AppColors.primary : AppColors.grey,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        pupil['name'] as String,
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 13 : 14,
+                          color: hasFee ? AppColors.textPrimary : AppColors.grey,
+                        ),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Class: ${pupil['class']}',
+                            style: TextStyle(
+                              fontSize: isSmallScreen ? 11 : 12,
+                              color: hasFee ? AppColors.textSecondary : AppColors.grey,
+                            ),
+                          ),
+                          if (!hasFee)
+                            Text(
+                              'Click to fetch fee',
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 10 : 11,
+                                color: AppColors.info,
+                              ),
+                            ),
+                        ],
+                      ),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            hasFee ? '₦${feeAmount.toStringAsFixed(2)}' : 'No Fee',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: isSmallScreen ? 12 : 13,
+                              color: hasFee ? AppColors.primary : AppColors.grey,
+                            ),
+                          ),
+                          if (hasFee)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.success.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Payable',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: AppColors.success,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _payFeesForPupil(pupil);
+                      },
+                    );
+                  }).toList(),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  void _payFeesForPupil(Map<String, dynamic> pupil) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Pay Fees for ${pupil['name']}', style: const TextStyle(color: AppColors.primary, fontSize: 16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Amount: ₦${(pupil['feeAmount'] as double).toStringAsFixed(2)}', style: TextStyle(fontSize: isSmallScreen ? 13 : 14)),
-            const SizedBox(height: 16),
-            const Text('Confirm payment from wallet?', style: TextStyle(fontSize: 13)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              if ((pupil['feeAmount'] as double) <= _walletBalance) {
-                setState(() {
-                  pupil['feeStatus'] = 'Paid';
-                  _walletBalance -= (pupil['feeAmount'] as double);
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Payment of ₦${(pupil['feeAmount'] as double).toStringAsFixed(2)} for ${pupil['name']} successful!'), backgroundColor: AppColors.success),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Insufficient wallet balance!'), backgroundColor: AppColors.error),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
   }
@@ -1645,8 +2078,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                         ),
                       ),
                       const SizedBox(height: 16),
-
-                      // Child Selection
                       Container(
                         padding: EdgeInsets.all(isSmallScreen ? 10 : 12),
                         decoration: BoxDecoration(
@@ -1712,10 +2143,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 16),
-
-                      // Statistics
                       if (!_isLoadingHMO && _hospitalRecords.isNotEmpty)
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -1731,10 +2159,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                             ],
                           ),
                         ),
-
                       const SizedBox(height: 16),
-
-                      // Records List
                       Expanded(
                         child: _isLoadingHMO
                             ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
@@ -2334,9 +2759,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
     final isTablet = screenWidth >= 600 && screenWidth < 1200;
-    final isDesktop = screenWidth >= 1200;
 
-    // Create ResponsiveInfo object
     final resp = ResponsiveInfo(screenWidth);
 
     return Scaffold(
@@ -2441,11 +2864,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     final isMobile = resp.isMobile;
     final statsColumns = isMobile ? 2 : (resp.isTablet ? 3 : 4);
 
-    double outstandingFees = _pupils.fold(0.0, (sum, pupil) {
-      if (pupil['feeStatus'] == 'Pending') return sum + (pupil['feeAmount'] as double);
-      return sum;
-    });
-
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.all(resp.padding),
@@ -2456,7 +2874,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           const SizedBox(height: 12),
           _buildCarousel(resp),
           const SizedBox(height: 12),
-          _buildStatsGrid(resp, statsColumns, outstandingFees),
+          _buildStatsGrid(resp, statsColumns),
           const SizedBox(height: 12),
           _buildSectionTitle('My Children', 'View All', resp),
           const SizedBox(height: 8),
@@ -2559,7 +2977,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  Widget _buildStatsGrid(ResponsiveInfo resp, int crossAxisCount, double outstandingFees) {
+  Widget _buildStatsGrid(ResponsiveInfo resp, int crossAxisCount) {
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -2663,7 +3081,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
 
     return Column(
       children: [
-        // Search Bar
         Container(
           padding: EdgeInsets.symmetric(horizontal: resp.padding, vertical: resp.isMobile ? 6 : 8),
           child: TextField(
@@ -2692,8 +3109,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             ),
           ),
         ),
-
-        // Results Count
         if (_isSearchingPupils)
           Container(
             padding: EdgeInsets.symmetric(horizontal: resp.padding, vertical: 6),
@@ -2707,8 +3122,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               ),
             ),
           ),
-
-        // Pupils List
         Container(
           decoration: BoxDecoration(
             gradient: AppColors.cardGradientLight,
@@ -2734,6 +3147,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         pupil['teacherPhone'] != 'Not available' &&
         pupil['teacherPhone'] != 'N/A' &&
         pupil['teacherPhone'].toString().isNotEmpty;
+    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+    final hasFee = feeAmount > 0;
 
     return ListTile(
       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: resp.isMobile ? 6 : 8),
@@ -2768,6 +3183,14 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             ),
           ),
           Text(
+            'Fee: ₦${feeAmount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: resp.smallCaptionSize,
+              color: hasFee ? AppColors.primary : AppColors.grey,
+              fontWeight: hasFee ? FontWeight.w500 : FontWeight.normal,
+            ),
+          ),
+          Text(
             'Teacher: ${pupil['teacherName']}',
             style: TextStyle(
               fontSize: resp.smallCaptionSize,
@@ -2779,6 +3202,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (hasFee)
+            IconButton(
+              icon: Icon(Icons.payment, color: AppColors.primary, size: resp.smallIconSize),
+              onPressed: () => _payFeesForPupil(pupil),
+              tooltip: 'Pay Fees',
+            ),
           if (hasPhone)
             IconButton(
               icon: Icon(Icons.phone, color: AppColors.success, size: resp.smallIconSize),
@@ -2794,6 +3223,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             icon: Icon(Icons.chevron_right, color: AppColors.primary, size: resp.smallIconSize),
             onPressed: () => _showPupilDetails(pupil),
             tooltip: 'Details',
+          ),
+          IconButton(
+            icon: Icon(Icons.discount_rounded, color: AppColors.warning, size: resp.smallIconSize),
+            onPressed: () => _showStudentDiscounts(pupil),
+            tooltip: 'View Discounts',
           ),
         ],
       ),
@@ -2812,9 +3246,327 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         _buildActionTile(Icons.payments, 'Fees', () => _showFeesScreen(), resp),
         _buildActionTile(Icons.grade, 'Results', () => _showResultsScreen(), resp),
         _buildActionTile(Icons.health_and_safety, 'HMO', () => _showHMOScreen(), resp),
+        _buildActionTile(Icons.discount_rounded, 'Discounts', () => _showDiscountsScreen(), resp),
         _buildActionTile(Icons.message, 'Messages', _navigateToMessages, resp),
         _buildActionTile(Icons.history, 'History', () => _showTransactionHistory(), resp),
       ],
+    );
+  }
+
+  void _showDiscountsScreen() {
+    if (_pupils.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
+      );
+      return;
+    }
+
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(isSmallScreen ? 12 : 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Student Discounts',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.close, size: isSmallScreen ? 20 : 24),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Consumer<DiscountProvider>(
+                  builder: (context, discountProvider, child) {
+                    if (discountProvider.isLoading) {
+                      return const Center(
+                        child: CircularProgressIndicator(color: AppColors.primary),
+                      );
+                    }
+
+                    final hasAnyDiscounts = _pupils.any((pupil) {
+                      final studentId = pupil['id']?.toString() ?? '';
+                      return discountProvider.discounts
+                          .any((d) => d.studentId == studentId);
+                    });
+
+                    if (!hasAnyDiscounts) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.discount_rounded,
+                              size: isSmallScreen ? 48 : 64,
+                              color: AppColors.grey,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No discounts available',
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 14 : 16,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'No student discounts have been applied yet',
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 12 : 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      controller: scrollController,
+                      itemCount: _pupils.length,
+                      itemBuilder: (context, index) {
+                        final pupil = _pupils[index];
+                        final studentId = pupil['id']?.toString() ?? '';
+                        final pupilDiscounts = discountProvider.discounts
+                            .where((d) => d.studentId == studentId)
+                            .toList();
+
+                        return _buildStudentDiscountCard(
+                          pupil: pupil,
+                          discounts: pupilDiscounts,
+                          isSmallScreen: isSmallScreen,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStudentDiscountCard({
+    required Map<String, dynamic> pupil,
+    required List<DiscountModel> discounts,
+    required bool isSmallScreen,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradientLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: discounts.isNotEmpty ? AppColors.primary.withOpacity(0.3) : AppColors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: isSmallScreen ? 18 : 22,
+                backgroundColor: AppColors.primary.withOpacity(0.1),
+                child: Text(
+                  pupil['name'][0].toUpperCase(),
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: isSmallScreen ? 14 : 16,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pupil['name'],
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: isSmallScreen ? 14 : 16,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      pupil['class'],
+                      style: TextStyle(
+                        fontSize: isSmallScreen ? 12 : 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      'Admission: ${pupil['admissionNo']}',
+                      style: TextStyle(
+                        fontSize: isSmallScreen ? 11 : 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: discounts.isEmpty ? Colors.grey[200] : AppColors.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  discounts.isEmpty ? 'No Discount' : '${discounts.length} Discount${discounts.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 11 : 12,
+                    fontWeight: FontWeight.w600,
+                    color: discounts.isEmpty ? Colors.grey[600] : AppColors.success,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (discounts.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            ...discounts.map((discount) => _buildDiscountItem(discount, isSmallScreen)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscountItem(DiscountModel discount, bool isSmallScreen) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.all(isSmallScreen ? 8 : 10),
+      decoration: BoxDecoration(
+        color: discount.isValid ? AppColors.primary.withOpacity(0.05) : AppColors.grey.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: discount.isValid ? AppColors.primary.withOpacity(0.2) : AppColors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: discount.isValid ? AppColors.primary.withOpacity(0.1) : AppColors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(
+              discount.isValid ? Icons.check_circle : Icons.cancel,
+              size: isSmallScreen ? 16 : 18,
+              color: discount.isValid ? AppColors.success : AppColors.grey,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  discount.discountType ?? 'Discount',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: isSmallScreen ? 12 : 13,
+                    color: discount.isValid ? AppColors.textPrimary : AppColors.textSecondary,
+                  ),
+                ),
+                if (discount.description != null)
+                  Text(
+                    discount.description!,
+                    style: TextStyle(
+                      fontSize: isSmallScreen ? 10 : 11,
+                      color: AppColors.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                Row(
+                  children: [
+                    if (discount.percentage != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          discount.formattedPercentage,
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 10 : 11,
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    if (discount.percentage != null && discount.amount != null)
+                      const SizedBox(width: 6),
+                    if (discount.amount != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          discount.formattedAmount,
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 10 : 11,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: discount.statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        discount.statusText,
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 9 : 10,
+                          color: discount.statusColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3076,6 +3828,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         pupil['teacherPhone'] != 'Not available' &&
         pupil['teacherPhone'] != 'N/A' &&
         pupil['teacherPhone'].toString().isNotEmpty;
+    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+    final hasFee = feeAmount > 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -3131,6 +3885,24 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                         color: AppColors.textSecondary,
                       ),
                     ),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.money_rounded,
+                          size: 12,
+                          color: hasFee ? AppColors.primary : AppColors.grey,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          hasFee ? 'Fee: ₦${feeAmount.toStringAsFixed(2)}' : 'Fee: Not Set',
+                          style: TextStyle(
+                            fontSize: resp.smallCaptionSize,
+                            color: hasFee ? AppColors.primary : AppColors.grey,
+                            fontWeight: hasFee ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -3156,6 +3928,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                 icon: Icon(Icons.chevron_right, color: AppColors.primary, size: resp.smallIconSize),
                 onPressed: () => _showPupilDetails(pupil),
                 tooltip: 'Details',
+              ),
+              IconButton(
+                icon: Icon(Icons.discount_rounded, color: AppColors.warning, size: resp.smallIconSize),
+                onPressed: () => _showStudentDiscounts(pupil),
+                tooltip: 'View Discounts',
               ),
             ],
           ),
@@ -3215,32 +3992,67 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           const SizedBox(height: 10),
           Row(
             children: [
+              if (hasFee)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _payFeesForPupil(pupil),
+                    icon: Icon(Icons.payment, size: resp.smallIconSize),
+                    label: Text('Pay Fee', style: TextStyle(fontSize: resp.buttonTextSize)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 6 : 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+              if (!hasFee)
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _payFeesForPupil(pupil),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 6 : 8),
+                      side: const BorderSide(color: AppColors.warning),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text('Check Fee', style: TextStyle(fontSize: resp.buttonTextSize, color: AppColors.warning)),
+                  ),
+                ),
+              const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _payFeesForPupil(pupil),
+                  onPressed: _isLoadingResult ? null : () => _viewPupilResults(pupil),
                   style: OutlinedButton.styleFrom(
                     padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 6 : 8),
                     side: const BorderSide(color: AppColors.primary),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  child: Text('Pay Fees', style: TextStyle(fontSize: resp.buttonTextSize)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _isLoadingResult ? null : () => _viewPupilResults(pupil),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 6 : 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
                   child: _isLoadingResult
-                      ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
-                      : Text('View Result', style: TextStyle(fontSize: resp.buttonTextSize)),
+                      ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                      : Text('View Result', style: TextStyle(fontSize: resp.buttonTextSize, color: AppColors.primary)),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showStudentDiscounts(pupil),
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 6 : 8),
+                side: const BorderSide(color: AppColors.warning),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              icon: Icon(Icons.discount_rounded, color: AppColors.warning, size: resp.smallIconSize),
+              label: Text(
+                'View Discounts',
+                style: TextStyle(
+                  fontSize: resp.buttonTextSize,
+                  color: AppColors.warning,
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -3272,7 +4084,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                 const SizedBox(height: 8),
                 Text(
                   '₦${_walletBalance.toStringAsFixed(2)}',
-                  style: TextStyle(fontSize: resp.largeValueSize, fontWeight: FontWeight.bold, color: AppColors.white),
+                  style: TextStyle(
+                    fontSize: resp.largeValueSize,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.white,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -3439,6 +4255,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             child: Column(
               children: [
                 _buildMoreOption(Icons.assignment, 'All Assignments', 'View all assignments', _showViewAssignmentsScreen, resp),
+                _buildMoreOption(Icons.discount_rounded, 'Student Discounts', 'View all student discounts', _showDiscountsScreen, resp),
                 _buildMoreOption(Icons.message, 'Messages', 'View all messages', _navigateToMessages, resp),
                 _buildMoreOption(Icons.newspaper, 'All News', 'View all news', () => _showAllNews(resp), resp),
                 _buildMoreOption(Icons.help, 'Help & Support', 'Get assistance', _showComingSoon, resp),
