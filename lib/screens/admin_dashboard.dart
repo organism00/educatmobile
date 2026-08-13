@@ -94,6 +94,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
     };
   }
+// Add this method to your Admin Dashboard class
+
+  String _getCurrentSessionId() {
+    // Try to get session ID from current user
+    String sessionId = _currentUser.sessionId ?? '';
+
+    if (sessionId.isEmpty) {
+      // Try to get from user model's sessionId
+      sessionId = _currentUser.sessionId ?? '';
+    }
+
+    if (sessionId.isEmpty) {
+      // Default to current academic year
+      final now = DateTime.now();
+      final year = now.year;
+      final nextYear = year + 1;
+      sessionId = '$year/$nextYear';
+      print('⚠️ Using default session ID: $sessionId');
+    }
+
+    print('📅 Session ID being used: $sessionId');
+    return sessionId;
+  }
 
   void _loadUserData() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -136,8 +159,52 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     try {
-      // Fetch classrooms first
-      await _fetchClassrooms(token);
+      // Get the session ID
+      final sessionId = _getCurrentSessionId();
+      final termId = _currentUser.termId ?? '1';
+
+      print('📊 Fetching dashboard data...');
+      print('📅 Session ID: $sessionId');
+      print('📚 Term ID: $termId');
+
+      // First, get expected revenue data directly
+      print('💰 Fetching expected revenue...');
+      final expectedRevenueResult = await _apiService.getExpectedRevenueForTerm(
+        token: token,
+        sessionId: sessionId,
+        termId: termId,
+      );
+
+      Map<String, Map<String, dynamic>> expectedRevenueMap = {};
+      double totalExpectedRevenue = 0;
+
+      if (expectedRevenueResult['success'] && expectedRevenueResult['data'] != null) {
+        final data = expectedRevenueResult['data'];
+        final classroomDetails = data['classroomDetails'] as List? ?? [];
+        print('📊 Found ${classroomDetails.length} classroom details');
+
+        for (var classroom in classroomDetails) {
+          final classFee = (classroom['classFee'] ?? 0.0).toDouble();
+          final numberOfStudents = (classroom['numberOfStudents'] ?? 0).toInt();
+          final expectedRevenue = (classroom['expectedRevenue'] ?? 0.0).toDouble();
+          totalExpectedRevenue += expectedRevenue;
+
+          expectedRevenueMap[classroom['classroomId']] = {
+            'expectedRevenue': expectedRevenue,
+            'classFee': classFee,
+            'numberOfStudents': numberOfStudents,
+          };
+
+          print('   📚 ${classroom['className']}: Fee=₦$classFee, Students=$numberOfStudents, Expected=₦$expectedRevenue');
+        }
+        print('💰 Total Expected Revenue: ₦$totalExpectedRevenue');
+      } else {
+        print('❌ Failed to fetch expected revenue: ${expectedRevenueResult['message']}');
+        // Continue with empty expected revenue map
+      }
+
+      // Then fetch classrooms with the expected revenue map
+      await _fetchClassrooms(token, expectedRevenueMap);
 
       // Then fetch all other data in parallel
       await Future.wait([
@@ -148,6 +215,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _fetchGuardianTransactions(token),
       ]);
 
+      // After classrooms are loaded, fetch financial data for each
+      await _fetchAllClassroomFinancialData(token, expectedRevenueMap, sessionId, termId);
+
       setState(() {
         _filteredStudents = List.from(_students);
         _filteredTeachers = List.from(_teachers);
@@ -156,12 +226,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _isLoading = false;
       });
 
-      // Fetch financial data after UI is rendered
-      _fetchAllClassroomFinancialData(token);
+      // Fetch guardian students mappings
       _fetchGuardianStudentsMappings(token);
 
     } catch (e) {
-      print('Error in _fetchDashboardData: $e');
+      print('❌ Error in _fetchDashboardData: $e');
       setState(() {
         _errorMessage = 'Error loading data. Please check your connection.';
         _isLoading = false;
@@ -340,28 +409,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
-  Future<void> _fetchClassrooms(String token) async {
+  Future<void> _fetchClassrooms(String token, Map<String, Map<String, dynamic>> expectedRevenueMap) async {
     try {
-      // First get expected revenue data to get accurate fee amounts
-      final expectedRevenueResult = await _apiService.getExpectedRevenueForTerm(
-        token: token,
-        sessionId: _currentUser.sessionId,
-        termId: _currentUser.termId,
-      );
+      print('📚 Fetching classrooms...');
 
-      Map<String, Map<String, dynamic>> classroomDataMap = {};
-      if (expectedRevenueResult['success'] && expectedRevenueResult['data'] != null) {
-        final classroomDetails = expectedRevenueResult['data']['classroomDetails'] as List? ?? [];
-        for (var c in classroomDetails) {
-          classroomDataMap[c['classroomId']] = {
-            'feeAmount': (c['classFee'] ?? 0.0).toDouble(),
-            'studentCount': c['numberOfStudents'] ?? 0,
-            'expectedRevenue': c['expectedRevenue'] ?? 0.0,
-          };
-        }
-      }
-
-      // Get basic classroom info
       final result = await _apiService.getClassroomsBySchoolId(
         token: token,
         schoolId: _currentUser.schoolId,
@@ -369,6 +420,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (result['success'] && mounted) {
         final classroomsData = result['data'] as List? ?? [];
+        print('📚 Found ${classroomsData.length} classrooms');
 
         final List<Map<String, dynamic>> basicClassrooms = [];
 
@@ -376,11 +428,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
           String teacherName = 'Not Assigned';
           String teacherId = '';
 
-          // Get fee amount from the classroom data map
-          final classroomInfo = classroomDataMap[c['classroomId']];
-          double feeAmount = classroomInfo?['feeAmount'] ?? 0.0;
+          // Get fee amount from the expected revenue map
+          final classroomInfo = expectedRevenueMap[c['classroomId']];
+          double feeAmount = classroomInfo?['classFee'] ?? 0.0;
+          int studentCount = classroomInfo?['numberOfStudents'] ?? 0;
 
-          print('📚 ${c['name']}: Fee = ₦$feeAmount');
+          print('   📚 ${c['name']}: Fee=₦$feeAmount, Students=$studentCount');
 
           try {
             final teacherResult = await _apiService.getTeacherByClass(
@@ -407,6 +460,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'teacherId': teacherId,
             'teacherName': teacherName,
             'feeAmount': feeAmount,
+            'studentCount': studentCount,
           });
         }
 
@@ -416,9 +470,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
 
         print('✅ Classrooms loaded: ${_classrooms.length}');
+      } else {
+        print('❌ Failed to fetch classrooms: ${result['message']}');
       }
     } catch (e) {
-      print('Error fetching classrooms: $e');
+      print('❌ Error fetching classrooms: $e');
       setState(() {
         _classrooms = [];
         _filteredClassrooms = [];
@@ -493,52 +549,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  Future<void> _fetchAllClassroomFinancialData(String token) async {
-    if (_classrooms.isEmpty) return;
+  Future<void> _fetchAllClassroomFinancialData(
+      String token,
+      Map<String, Map<String, dynamic>> expectedRevenueMap,
+      String sessionId,
+      String termId,
+      ) async {
+    if (_classrooms.isEmpty) {
+      print('⚠️ No classrooms to fetch financial data for');
+      return;
+    }
 
     setState(() {
       _financialDataLoaded = false;
     });
 
-    // First, get the expected revenue data for all classrooms at once
-    final expectedRevenueResult = await _apiService.getExpectedRevenueForTerm(
-      token: token,
-      sessionId: _currentUser.sessionId,
-      termId: _currentUser.termId,
-    );
+    print('💰 Fetching financial data for ${_classrooms.length} classrooms...');
+    print('📅 Using Session: $sessionId, Term: $termId');
 
-    Map<String, Map<String, dynamic>> expectedRevenueMap = {};
-    if (expectedRevenueResult['success'] && expectedRevenueResult['data'] != null) {
-      final classroomDetails = expectedRevenueResult['data']['classroomDetails'] as List? ?? [];
-      for (var classroom in classroomDetails) {
-        expectedRevenueMap[classroom['classroomId']] = {
-          'expectedRevenue': classroom['expectedRevenue'] ?? 0.0,
-          'classFee': classroom['classFee'] ?? 0.0,
-          'numberOfStudents': classroom['numberOfStudents'] ?? 0,
-        };
-      }
-      print('✅ Expected revenue data loaded for ${expectedRevenueMap.length} classrooms');
-    }
-
-    // Process each classroom in parallel but with concurrency limit
-    final List<Future> futures = [];
+    // Process each classroom
     for (var classroom in _classrooms) {
-      futures.add(_fetchClassroomFinancialData(token, classroom, expectedRevenueMap));
-
-      if (futures.length >= 5) {
-        await Future.wait(futures);
-        futures.clear();
-      }
-    }
-
-    if (futures.isNotEmpty) {
-      await Future.wait(futures);
+      await _fetchClassroomFinancialData(token, classroom, expectedRevenueMap, sessionId, termId);
     }
 
     if (mounted) {
       setState(() {
         _financialDataLoaded = true;
       });
+      print('✅ All classroom financial data loaded');
+
+      // Print summary
+      double totalExpected = 0;
+      double totalPaid = 0;
+      double totalOwed = 0;
+      for (var classroom in _classrooms) {
+        final financialData = _classroomFinancialData[classroom['id']] ?? {};
+        totalExpected += (financialData['expectedRevenue'] as double?) ?? 0;
+        totalPaid += (financialData['totalPaid'] as double?) ?? 0;
+        totalOwed += (financialData['totalOwed'] as double?) ?? 0;
+      }
+      print('📊 Financial Summary:');
+      print('   Total Expected: ₦$totalExpected');
+      print('   Total Paid: ₦$totalPaid');
+      print('   Total Owed: ₦$totalOwed');
     }
   }
 
@@ -546,8 +599,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       String token,
       Map<String, dynamic> classroom,
       Map<String, Map<String, dynamic>> expectedRevenueMap,
+      String sessionId,
+      String termId,
       ) async {
     final classroomId = classroom['id'];
+    final classroomName = classroom['name'] ?? 'Unknown';
 
     // Get expected revenue from the pre-fetched data
     final expectedData = expectedRevenueMap[classroomId];
@@ -555,7 +611,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final feePerStudent = (expectedData?['classFee'] as double?) ?? 0.0;
     final studentCount = (expectedData?['numberOfStudents'] as int?) ?? 0;
 
-    print('💰 Fetching financial data for ${classroom['name']}');
+    print('💰 Fetching financial data for $classroomName');
+    print('   Session: $sessionId, Term: $termId');
     print('   Expected Revenue: ₦$expectedRevenue');
     print('   Fee per Student: ₦$feePerStudent');
     print('   Student Count: $studentCount');
@@ -565,8 +622,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final paidResult = await _apiService.getTotalAmountPaidInClassByTerm(
         token: token,
         classroomId: classroomId,
-        sessionId: _currentUser.sessionId,
-        termId: _currentUser.termId,
+        sessionId: sessionId,
+        termId: termId,
       ).timeout(const Duration(seconds: 10));
 
       final totalPaid = (paidResult['data'] ?? 0.0).toDouble();
@@ -576,8 +633,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final debtResult = await _apiService.getTotalDebtOwedInClassByTerm(
         token: token,
         classroomId: classroomId,
-        sessionId: _currentUser.sessionId,
-        termId: _currentUser.termId,
+        sessionId: sessionId,
+        termId: termId,
       ).timeout(const Duration(seconds: 10));
 
       final totalOwed = (debtResult['data'] ?? 0.0).toDouble();
@@ -587,8 +644,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final studentsOwingResult = await _apiService.getStudentsOwingInClassByTerm(
         token: token,
         classroomId: classroomId,
-        sessionId: _currentUser.sessionId,
-        termId: _currentUser.termId,
+        sessionId: sessionId,
+        termId: termId,
       ).timeout(const Duration(seconds: 10));
 
       List<Map<String, dynamic>> studentsOwing = [];
@@ -617,7 +674,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       }
     } catch (e) {
-      print('❌ Error fetching financial data for ${classroom['name']}: $e');
+      print('❌ Error fetching financial data for $classroomName: $e');
       if (mounted) {
         setState(() {
           _classroomFinancialData[classroomId] = {
@@ -633,7 +690,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
     }
   }
-
 
   Future<void> _refreshData() async {
     setState(() {
@@ -1749,7 +1805,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     ),
     );
   }
-
   Widget _buildHomeScreen() {
     int totalStudents = _students.length;
     int totalTeachers = _teachers.length;
@@ -1760,11 +1815,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     double totalPaid = 0;
     double totalOwed = 0;
 
+    // Calculate totals from classroom financial data
     for (var classroom in _classrooms) {
       final financialData = _classroomFinancialData[classroom['id']] ?? {};
-      totalExpected += (financialData['expectedRevenue'] as double?) ?? 0;
-      totalPaid += (financialData['totalPaid'] as double?) ?? 0;
-      totalOwed += (financialData['totalOwed'] as double?) ?? 0;
+      final expected = (financialData['expectedRevenue'] as double?) ?? 0;
+      final paid = (financialData['totalPaid'] as double?) ?? 0;
+      final owed = (financialData['totalOwed'] as double?) ?? 0;
+
+      totalExpected += expected;
+      totalPaid += paid;
+      totalOwed += owed;
+
+      print('📊 ${classroom['name']}: Expected=₦$expected, Paid=₦$paid, Owed=₦$owed');
     }
 
     print('📊 Dashboard Totals:');
@@ -1887,7 +1949,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+
   Widget _buildSchoolInfoCard() {
+    final sessionId = _getCurrentSessionId();
+    final termId = _currentUser.termId ?? '1';
+
     return Container(
       padding: EdgeInsets.all(_isMobile ? 12 : 16),
       decoration: BoxDecoration(
@@ -1946,7 +2012,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: Column(
                     children: [
                       Text(
-                        _currentUser.term,
+                        termId,
                         style: TextStyle(
                           fontSize: _isMobile ? 11 : 12,
                           fontWeight: FontWeight.bold,
@@ -1971,7 +2037,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: Column(
                     children: [
                       Text(
-                        _currentUser.sessionId,
+                        sessionId,
                         style: TextStyle(
                           fontSize: _isMobile ? 11 : 12,
                           fontWeight: FontWeight.bold,

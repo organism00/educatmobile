@@ -48,6 +48,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     super.dispose();
   }
 
+// In fee_payment_screen.dart
+
   Future<void> _calculateDiscount() async {
     setState(() {
       _isCalculating = true;
@@ -65,11 +67,11 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       return;
     }
 
+    // The provider will handle fetching the discount and using the correct session/term IDs
     final success = await feeProvider.calculateDiscountedFee(
       token: token,
       studentId: widget.studentId,
       originalFee: widget.originalFee,
-      sessionId: widget.sessionId,
     );
 
     if (!success && mounted) {

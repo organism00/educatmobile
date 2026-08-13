@@ -305,6 +305,8 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     }
   }
 
+  // In GuardianDashboard _fetchDiscountsForAllPupils method
+
   Future<void> _fetchDiscountsForAllPupils(String token) async {
     try {
       final discountProvider = Provider.of<DiscountProvider>(context, listen: false);
@@ -316,21 +318,12 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
 
       print('🔍 Fetching discounts for ${_pupils.length} pupils');
 
-      final futures = _pupils.map((pupil) async {
-        final studentId = pupil['id']?.toString();
-        if (studentId != null && studentId.isNotEmpty) {
-          try {
-            await discountProvider.fetchStudentDiscounts(
-              token: token,
-              studentId: studentId,
-            );
-          } catch (e) {
-            print('⚠️ Error fetching discounts for student $studentId: $e');
-          }
-        }
-      }).toList();
+      // Use the new method to fetch all discounts
+      await discountProvider.fetchDiscountsForAllPupils(
+        token: token,
+        pupils: _pupils,
+      );
 
-      await Future.wait(futures, eagerError: false);
       print('✅ All discounts fetched');
     } catch (e) {
       print('⚠️ Error in _fetchDiscountsForAllPupils: $e');
@@ -3253,6 +3246,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
+// In the _showDiscountsScreen method in GuardianDashboard
+
   void _showDiscountsScreen() {
     if (_pupils.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3306,10 +3301,10 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                       );
                     }
 
+                    // Check if any pupil has discounts using the updated provider
                     final hasAnyDiscounts = _pupils.any((pupil) {
                       final studentId = pupil['id']?.toString() ?? '';
-                      return discountProvider.discounts
-                          .any((d) => d.studentId == studentId);
+                      return discountProvider.getDiscountsForStudent(studentId).isNotEmpty;
                     });
 
                     if (!hasAnyDiscounts) {
@@ -3349,9 +3344,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                       itemBuilder: (context, index) {
                         final pupil = _pupils[index];
                         final studentId = pupil['id']?.toString() ?? '';
-                        final pupilDiscounts = discountProvider.discounts
-                            .where((d) => d.studentId == studentId)
-                            .toList();
+                        final pupilDiscounts = discountProvider.getDiscountsForStudent(studentId);
 
                         return _buildStudentDiscountCard(
                           pupil: pupil,
@@ -3369,6 +3362,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       ),
     );
   }
+
+// Update _buildStudentDiscountCard to handle the new discount model
 
   Widget _buildStudentDiscountCard({
     required Map<String, dynamic> pupil,
@@ -3491,16 +3486,16 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  discount.discountType ?? 'Discount',
+                  discount.discountType,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: isSmallScreen ? 12 : 13,
                     color: discount.isValid ? AppColors.textPrimary : AppColors.textSecondary,
                   ),
                 ),
-                if (discount.description != null)
+                if (discount.description.isNotEmpty)
                   Text(
-                    discount.description!,
+                    discount.description,
                     style: TextStyle(
                       fontSize: isSmallScreen ? 10 : 11,
                       color: AppColors.textSecondary,
@@ -3510,40 +3505,22 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   ),
                 Row(
                   children: [
-                    if (discount.percentage != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          discount.formattedPercentage,
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 10 : 11,
-                            color: AppColors.success,
-                            fontWeight: FontWeight.w600,
-                          ),
+                    // Show the discount amount (since there's no percentage)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        discount.formattedAmount,
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 10 : 11,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    if (discount.percentage != null && discount.amount != null)
-                      const SizedBox(width: 6),
-                    if (discount.amount != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          discount.formattedAmount,
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 10 : 11,
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                    ),
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -3569,6 +3546,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       ),
     );
   }
+
+
 
   Widget _buildActionTile(IconData icon, String label, VoidCallback onTap, ResponsiveInfo resp) {
     return InkWell(

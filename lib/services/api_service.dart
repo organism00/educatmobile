@@ -2340,6 +2340,11 @@ class ApiService {
 // ==================== STUDENT DISCOUNT ENDPOINTS ====================
 
   /// Get discounts for a specific student
+
+  /// Get discounts for a specific student
+  // In api_service.dart
+
+  /// Get discounts for a specific student
   Future<Map<String, dynamic>> getStudentDiscounts({
     required String token,
     required String studentId,
@@ -2366,9 +2371,8 @@ class ApiService {
         },
       ).timeout(timeout);
 
-      print('📥 Discounts Response');
-      print('Status Code: ${response.statusCode}');
-      print('Body: ${response.body}');
+      print('📥 Discounts Response Status: ${response.statusCode}');
+      print('📥 Discounts Response Body: ${response.body}');
 
       if (response.body.isEmpty) {
         return {
@@ -2376,6 +2380,7 @@ class ApiService {
           'message': 'Empty response from server',
           'discounts': [],
           'hasDiscounts': false,
+          'discountCount': 0,
         };
       }
 
@@ -2384,14 +2389,25 @@ class ApiService {
       final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
 
       if (httpStatus == 200 && isSuccess) {
-        // Get the discounts data (might be null or empty)
         final data = responseData['data'];
+
+        // Ensure data is a List
         final List<dynamic> discounts = data is List ? data : [];
+
+        print('💰 Found ${discounts.length} discount(s)');
+        for (var discount in discounts) {
+          if (discount is Map<String, dynamic>) {
+            print('   Discount ID: ${discount['discountId']}');
+            print('   Amount: ₦${discount['discountAmount']}');
+            print('   Reason: ${discount['reason']}');
+            print('   Active: ${discount['isActive']}');
+          }
+        }
 
         return {
           'success': true,
           'message': responseData['responseMessage'] ?? 'Discounts retrieved successfully',
-          'discounts': discounts,
+          'discounts': discounts, // This is now a List<dynamic> not List<DiscountModel>
           'hasDiscounts': discounts.isNotEmpty,
           'discountCount': discounts.length,
           'rawData': responseData,
@@ -2416,10 +2432,6 @@ class ApiService {
       };
     }
   }
-
-  // Add this method to your ApiService class
-
-  /// Get class fee for a specific term
 
   /// Get class fee for a specific term
   Future<Map<String, dynamic>> getClassFeeForTerm({
@@ -2572,12 +2584,19 @@ class ApiService {
       };
     }
   }
+
+
+  /// Get discounted fee for a student (this is what calculates the fee after discount)
   /// Get discounted fee for a student
+  // In api_service.dart
+
+  /// Get discounted fee for a student (using sessionId and termId from the discount)
   Future<Map<String, dynamic>> getDiscountedFee({
     required String token,
     required String studentId,
     required double originalFee,
     required String sessionId,
+    required String termId,
   }) async {
     try {
       // Check if token is expired
@@ -2589,10 +2608,19 @@ class ApiService {
         };
       }
 
+      // URL encode parameters
+      final encodedSessionId = Uri.encodeComponent(sessionId);
+      final encodedTermId = Uri.encodeComponent(termId);
+
       final url = Uri.parse(
-          '$baseUrl/StudentDiscount/GetDiscountedFee?studentId=$studentId&originalFee=$originalFee&sessionId=$sessionId'
+          '$baseUrl/StudentDiscount/GetDiscountedFee?studentId=$studentId&originalFee=$originalFee&sessionId=$encodedSessionId&termId=$encodedTermId'
       );
+
       print('📤 Fetching discounted fee from: $url');
+      print('📤 StudentId: $studentId');
+      print('📤 OriginalFee: $originalFee');
+      print('📤 SessionId: $sessionId');
+      print('📤 TermId: $termId');
 
       final response = await http.get(
         url,
@@ -2623,9 +2651,15 @@ class ApiService {
 
       if (httpStatus == 200 && isSuccess) {
         final data = responseData['data'];
-        final double discountedFee = (data?['discountedFee'] ?? originalFee).toDouble();
+        final double discountedFee = (data?['feeAfterDiscount'] ?? data?['discountedFee'] ?? originalFee).toDouble();
         final double discountAmount = (data?['discountAmount'] ?? 0).toDouble();
         final bool hasDiscount = data?['hasDiscount'] ?? false;
+
+        print('💰 Discount Calculation Result:');
+        print('   Original Fee: ₦$originalFee');
+        print('   Discount Amount: ₦$discountAmount');
+        print('   Fee After Discount: ₦$discountedFee');
+        print('   Has Discount: $hasDiscount');
 
         return {
           'success': true,
@@ -2659,7 +2693,6 @@ class ApiService {
       };
     }
   }
-
   /// Initiate school fee payment
   Future<Map<String, dynamic>> initiateSchoolFeePayment({
     required String token,

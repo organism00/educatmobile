@@ -27,22 +27,73 @@ class FeeProvider extends ChangeNotifier {
   bool paymentSuccess = false;
 
   /// Calculate discounted fee
+  // In fee_provider.dart
+
+  /// Calculate discounted fee
+  // In fee_provider.dart, make sure you're also fetching the discount
+
   Future<bool> calculateDiscountedFee({
     required String token,
     required String studentId,
     required double originalFee,
-    required String sessionId,
   }) async {
     isCalculatingDiscount = true;
     errorMessage = null;
     notifyListeners();
 
     try {
+      print('🔍 Calculating discount for student: $studentId');
+      print('💰 Original Fee: $originalFee');
+
+      // First, fetch the student's discount
+      final discountResult = await _apiService.getStudentDiscounts(
+        token: token,
+        studentId: studentId,
+      );
+
+      String sessionId = '';
+      String termId = '';
+      bool hasActiveDiscount = false;
+      double discountAmount = 0;
+
+      if (discountResult['success'] && discountResult['hasDiscounts']) {
+        final discounts = discountResult['discounts'] as List;
+
+        for (var discount in discounts) {
+          final isActive = discount['isActive'] == true;
+          if (isActive) {
+            sessionId = discount['sessionId']?.toString() ?? '';
+            termId = discount['termId']?.toString() ?? '';
+            discountAmount = (discount['discountAmount'] ?? 0).toDouble();
+            hasActiveDiscount = true;
+
+            print('✅ Found active discount:');
+            print('   Discount Amount: ₦$discountAmount');
+            print('   SessionId: $sessionId');
+            print('   TermId: $termId');
+            break;
+          }
+        }
+      }
+
+      if (!hasActiveDiscount || sessionId.isEmpty || termId.isEmpty) {
+        print('ℹ️ No active discount found for student');
+        this.originalFee = originalFee;
+        this.discountedFee = originalFee;
+        this.discountAmount = 0;
+        this.hasDiscount = false;
+        isCalculatingDiscount = false;
+        notifyListeners();
+        return true;
+      }
+
+      // Calculate the discounted fee
       final result = await _apiService.getDiscountedFee(
         token: token,
         studentId: studentId,
         originalFee: originalFee,
         sessionId: sessionId,
+        termId: termId,
       );
 
       if (result['success']) {
@@ -50,10 +101,12 @@ class FeeProvider extends ChangeNotifier {
         this.discountedFee = result['discountedFee'] ?? originalFee;
         this.discountAmount = result['discountAmount'] ?? 0;
         this.hasDiscount = result['hasDiscount'] ?? false;
-        this.discountDetails = result['discountDetails'];
-        errorMessage = null;
 
-        print('✅ Discount calculated: Original: $originalFee, Discounted: ${this.discountedFee}, Saved: ${this.discountAmount}');
+        print('✅ Discount calculated:');
+        print('   Original: ₦$originalFee');
+        print('   Discounted: ₦${this.discountedFee}');
+        print('   Saved: ₦${this.discountAmount}');
+
         isCalculatingDiscount = false;
         notifyListeners();
         return true;
@@ -68,6 +121,7 @@ class FeeProvider extends ChangeNotifier {
         return false;
       }
     } catch (e) {
+      print('❌ Error calculating discount: $e');
       this.originalFee = originalFee;
       this.discountedFee = originalFee;
       this.discountAmount = 0;
@@ -78,7 +132,6 @@ class FeeProvider extends ChangeNotifier {
       return false;
     }
   }
-
   /// Initiate payment
   Future<bool> initiatePayment({
     required String token,

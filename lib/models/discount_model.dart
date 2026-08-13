@@ -1,51 +1,48 @@
-// Create a new file: models/discount_model.dart
+// models/discount_model.dart
+
 import 'package:flutter/material.dart';
 
 class DiscountModel {
   final String? id;
   final String? studentId;
+  final String? studentName;
+  final String? className;
   final String? schoolId;
-  final String? discountType;
-  final double? percentage;
   final double? amount;
-  final String? description;
-  final DateTime? startDate;
-  final DateTime? endDate;
+  final String? reason;
   final bool? isActive;
+  final String? sessionId;
+  final String? termId;
   final String? createdBy;
   final DateTime? createdAt;
 
   DiscountModel({
     this.id,
     this.studentId,
+    this.studentName,
+    this.className,
     this.schoolId,
-    this.discountType,
-    this.percentage,
     this.amount,
-    this.description,
-    this.startDate,
-    this.endDate,
+    this.reason,
     this.isActive,
+    this.sessionId,
+    this.termId,
     this.createdBy,
     this.createdAt,
   });
 
   factory DiscountModel.fromJson(Map<String, dynamic> json) {
     return DiscountModel(
-      id: json['id']?.toString(),
+      id: json['discountId']?.toString() ?? json['id']?.toString(),
       studentId: json['studentId']?.toString(),
+      studentName: json['studentName']?.toString(),
+      className: json['className']?.toString(),
       schoolId: json['schoolId']?.toString(),
-      discountType: json['discountType']?.toString(),
-      percentage: (json['percentage'] as num?)?.toDouble(),
-      amount: (json['amount'] as num?)?.toDouble(),
-      description: json['description']?.toString(),
-      startDate: json['startDate'] != null
-          ? DateTime.tryParse(json['startDate'].toString())
-          : null,
-      endDate: json['endDate'] != null
-          ? DateTime.tryParse(json['endDate'].toString())
-          : null,
-      isActive: json['isActive'] as bool?,
+      amount: (json['discountAmount'] ?? json['amount'] ?? 0).toDouble(),
+      reason: json['reason']?.toString() ?? json['description']?.toString(),
+      isActive: json['isActive'] ?? json['active'] ?? true,
+      sessionId: json['sessionId']?.toString(),
+      termId: json['termId']?.toString(),
       createdBy: json['createdBy']?.toString(),
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString())
@@ -57,28 +54,35 @@ class DiscountModel {
     return {
       'id': id,
       'studentId': studentId,
+      'studentName': studentName,
+      'className': className,
       'schoolId': schoolId,
-      'discountType': discountType,
-      'percentage': percentage,
       'amount': amount,
-      'description': description,
-      'startDate': startDate?.toIso8601String(),
-      'endDate': endDate?.toIso8601String(),
+      'reason': reason,
       'isActive': isActive,
+      'sessionId': sessionId,
+      'termId': termId,
       'createdBy': createdBy,
       'createdAt': createdAt?.toIso8601String(),
     };
   }
 
   // Helper getters
-  String get formattedPercentage => percentage != null ? '${percentage!.toStringAsFixed(0)}%' : 'N/A';
-
   String get formattedAmount => amount != null ? '₦${amount!.toStringAsFixed(2)}' : '₦0.00';
 
-  bool get isValid => isActive == true &&
-      (endDate == null || endDate!.isAfter(DateTime.now()));
+  bool get isValid => isActive == true;
 
   String get statusText => isValid ? 'Active' : 'Expired';
 
   Color get statusColor => isValid ? Colors.green : Colors.grey;
+
+  String get discountType => reason ?? 'Discount';
+  String get description => reason ?? '';
+
+  // Since there's no percentage, we calculate it if we have the original fee
+  // This will be set separately when we have the original fee context
+  double? getPercentage(double? originalFee) {
+    if (originalFee == null || originalFee <= 0 || amount == null) return null;
+    return (amount! / originalFee) * 100;
+  }
 }

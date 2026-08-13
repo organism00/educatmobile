@@ -1,4 +1,4 @@
-// Create a new file: screens/student_discount_screen.dart
+// screens/student_discount_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -36,7 +36,11 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
     _loadDiscounts();
   }
 
+  // screens/student_discount_screen.dart - Updated _loadDiscounts
+
   Future<void> _loadDiscounts() async {
+    print('🔄 Loading discounts for student: ${widget.studentId}');
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -44,6 +48,8 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
 
     try {
       final token = Provider.of<AuthProvider>(context, listen: false).token;
+      print('🔑 Token: ${token != null ? 'Present' : 'Missing'}');
+
       if (token == null) {
         setState(() {
           _errorMessage = 'Authentication required';
@@ -53,16 +59,42 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
       }
 
       final discountProvider = Provider.of<DiscountProvider>(context, listen: false);
-      await discountProvider.fetchStudentDiscounts(
+
+      // Fetch discounts for this student
+      print('📤 Calling fetchStudentDiscounts...');
+      final success = await discountProvider.fetchStudentDiscounts(
         token: token,
         studentId: widget.studentId,
       );
 
-      setState(() {
-        _discounts = discountProvider.discounts;
-        _isLoading = false;
-      });
+      print('📥 Success: $success');
+
+      if (success) {
+        // Get the discounts for this student
+        final studentDiscounts = discountProvider.getDiscountsForStudent(widget.studentId);
+        print('📦 Retrieved ${studentDiscounts.length} discounts from provider');
+
+        setState(() {
+          _discounts = List.from(studentDiscounts); // Create a new list
+          _isLoading = false;
+        });
+
+        if (_discounts.isEmpty) {
+          print('ℹ️ No discounts found for student: ${widget.studentName}');
+        } else {
+          for (var discount in _discounts) {
+            print('   ✅ ${discount.discountType}: ₦${discount.amount} (${discount.isValid ? 'Active' : 'Expired'})');
+          }
+        }
+      } else {
+        print('❌ Failed to load discounts');
+        setState(() {
+          _errorMessage = discountProvider.errorMessage ?? 'Failed to load discounts';
+          _isLoading = false;
+        });
+      }
     } catch (e) {
+      print('❌ Exception: $e');
       setState(() {
         _errorMessage = 'Failed to load discounts: $e';
         _isLoading = false;
@@ -121,101 +153,7 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Student Info Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: AppColors.primary.withOpacity(0.1),
-                      child: Text(
-                        widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : 'S',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.studentName,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Class: ${widget.studentClass}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          Text(
-                            'Admission No: ${widget.admissionNo}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Total Discounts:',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _discounts.isEmpty ? Colors.grey[200] : AppColors.success.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          _discounts.isEmpty ? 'No Discounts' : '${_discounts.length} Discount${_discounts.length > 1 ? 's' : ''}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: _discounts.isEmpty ? Colors.grey[600] : AppColors.success,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildStudentInfoCard(),
           const SizedBox(height: 24),
 
           // Discounts List
@@ -233,6 +171,104 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
             const SizedBox(height: 12),
             ..._discounts.map((discount) => _buildDiscountCard(discount)),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStudentInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradientLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 30,
+                backgroundColor: AppColors.primary.withOpacity(0.1),
+                child: Text(
+                  widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : 'S',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.studentName,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Class: ${widget.studentClass}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      'Admission No: ${widget.admissionNo}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Total Discounts:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _discounts.isEmpty ? Colors.grey[200] : AppColors.success.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _discounts.isEmpty ? 'No Discounts' : '${_discounts.length} Discount${_discounts.length > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _discounts.isEmpty ? Colors.grey[600] : AppColors.success,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -311,16 +347,16 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      discount.discountType ?? 'Discount',
+                      discount.discountType,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: isSmallScreen ? 14 : 16,
                         color: discount.isValid ? AppColors.textPrimary : AppColors.textSecondary,
                       ),
                     ),
-                    if (discount.description != null)
+                    if (discount.description.isNotEmpty)
                       Text(
-                        discount.description!,
+                        discount.description,
                         style: TextStyle(
                           fontSize: isSmallScreen ? 12 : 13,
                           color: AppColors.textSecondary,
@@ -346,109 +382,82 @@ class _StudentDiscountScreenState extends State<StudentDiscountScreen> {
               ),
             ],
           ),
-          if (discount.percentage != null || discount.amount != null) ...[
-            const SizedBox(height: 10),
+          const SizedBox(height: 10),
+          // Display the discount amount - since there's no percentage, only show amount
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'Discount Amount: ',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                Text(
+                  discount.formattedAmount,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Show creation info if available
+          if (discount.createdBy != null && discount.createdBy!.isNotEmpty) ...[
             Row(
               children: [
-                if (discount.percentage != null)
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.success.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            discount.formattedPercentage,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: AppColors.success,
-                            ),
-                          ),
-                          const Text(
-                            'Percentage',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                Icon(Icons.person, size: 12, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Text(
+                  'Created by: ${discount.createdBy}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
                   ),
-                if (discount.percentage != null && discount.amount != null)
-                  const SizedBox(width: 8),
-                if (discount.amount != null)
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            discount.formattedAmount,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          const Text(
-                            'Amount',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                ),
               ],
             ),
           ],
-          if (discount.startDate != null || discount.endDate != null) ...[
-            const SizedBox(height: 8),
+          if (discount.createdAt != null) ...[
             Row(
               children: [
-                if (discount.startDate != null)
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'From: ${_formatDate(discount.startDate!)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
+                Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Text(
+                  'Applied on: ${_formatDate(discount.createdAt!)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // Show session and term info if available
+          if (discount.sessionId != null && discount.sessionId!.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(Icons.assessment, size: 12, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Session ID: ${discount.sessionId!.substring(0, 8)}...',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
                     ),
                   ),
-                if (discount.endDate != null)
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          'To: ${_formatDate(discount.endDate!)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: discount.isValid ? AppColors.textSecondary : AppColors.error,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                ),
               ],
             ),
           ],
