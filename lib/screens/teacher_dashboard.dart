@@ -14,6 +14,39 @@ import '../services/notification_service.dart';
 import 'dart:io' show Platform;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+
+// ==================== RESPONSIVE DATA CLASS ====================
+
+class ResponsiveData {
+  final bool isMobile;
+  final bool isTablet;
+  final bool isDesktop;
+  final double padding;
+  final int gridCrossAxisCount;
+  final int quickActionsCount;
+  final double fontSizeSmall;
+  final double fontSizeMedium;
+  final double fontSizeLarge;
+  final double fontSizeHeader;
+  final double slideshowHeight;
+  final double cardElevation;
+
+  ResponsiveData({
+    required this.isMobile,
+    required this.isTablet,
+    required this.isDesktop,
+    required this.padding,
+    required this.gridCrossAxisCount,
+    required this.quickActionsCount,
+    required this.fontSizeSmall,
+    required this.fontSizeMedium,
+    required this.fontSizeLarge,
+    required this.fontSizeHeader,
+    required this.slideshowHeight,
+    required this.cardElevation,
+  });
+}
 
 // ==================== CLOCK IN/OUT WIDGET ====================
 
@@ -40,14 +73,11 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
   String? _clockOutTime;
   String? _statusMessage;
   bool _isLoadingStatus = true;
-
-  // Dynamically generate QR code value using actual school ID
-  String get _qrCodeValue =>
-      'SCHOOL_ATTENDANCE|${widget.user.schoolId}|${DateTime.now().millisecondsSinceEpoch}|${DateTime.now().millisecondsSinceEpoch.toString().substring(0, 8)}';
+  String? _scannedQrCode;
 
   // Location values - should be obtained from GPS in production
-  double _latitude = 0.0;
-  double _longitude = 0.0;
+  double _latitude = 6.636814;
+  double _longitude = 3.514077;
 
   @override
   void initState() {
@@ -58,10 +88,9 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
 
   Future<void> _getLocation() async {
     // In production, use geolocator package to get actual location
-    // For now, using placeholder values that should be replaced with actual GPS data
     setState(() {
-      _latitude = 6.636814; // Replace with actual GPS latitude
-      _longitude = 3.514077; // Replace with actual GPS longitude
+      _latitude = 6.636814;
+      _longitude = 3.514077;
     });
   }
 
@@ -81,9 +110,22 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
     _isClockedIn = _clockInTime != null && _clockOutTime == null;
 
     try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final token = authProvider.token;
+
+      if (token == null) {
+        print('❌ No token available');
+        setState(() {
+          _isLoadingStatus = false;
+        });
+        return;
+      }
+
       final result = await widget.apiService.getTeacherAttendanceStatus(
+        token: token,
         teacherId: widget.user.id,
       );
+
       if (result['success'] && mounted) {
         final data = result['data'];
         if (data != null) {
@@ -94,7 +136,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
             }
             if (data['clockOutTime'] != null) {
               _clockOutTime = data['clockOutTime'];
-              prefs. setString(clockOutKey, _clockOutTime!);
+              prefs.setString(clockOutKey, _clockOutTime!);
             }
             _isClockedIn = _clockInTime != null && _clockOutTime == null;
           });
@@ -109,69 +151,281 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
     });
   }
 
-  Future<void> _clockIn() async {
+  void _showQrScanner() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Scan QR Code',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Position the QR code from the admin dashboard inside the frame',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: MobileScanner(
+                onDetect: (detectEvent) {
+                  final barcodes = detectEvent.barcodes;
+                  if (barcodes.isNotEmpty) {
+                    final qrCodeValue = barcodes.first.rawValue;
+                    if (qrCodeValue != null && qrCodeValue.isNotEmpty) {
+                      setState(() {
+                        _scannedQrCode = qrCodeValue;
+                      });
+                      Navigator.pop(context);
+                      _clockInWithQrCode(qrCodeValue);
+                    }
+                  }
+                },
+                errorBuilder: (context, error, child) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 64,
+                          color: AppColors.error,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Camera Error',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Please grant camera permission to scan QR codes',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: () {
+                            // Retry camera
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _showManualQrEntry,
+                  child: const Text('Enter Manually'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showManualQrEntry() {
+    Navigator.pop(context);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter QR Code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Paste or type the QR code value from the admin dashboard',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              onSubmitted: (value) {
+                if (value.isNotEmpty) {
+                  Navigator.pop(context);
+                  _clockInWithQrCode(value);
+                }
+              },
+              decoration: const InputDecoration(
+                hintText: 'Paste QR Code here',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // We'll handle this differently
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
+            child: const Text('Clock In'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _clockInWithQrCode(String qrCodeValue) async {
     setState(() {
       _isLoading = true;
       _statusMessage = null;
     });
 
-    final deviceInfo = await _getDeviceInfo();
-    final ipAddress = await _getIpAddress();
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final token = authProvider.token;
 
-    final result = await widget.apiService.clockIn(
-      teacherId: widget.user.id,
-      schoolId: widget.user.schoolId,
-      qrCodeValue: _qrCodeValue,
-      latitude: _latitude,
-      longitude: _longitude,
-      deviceModel: deviceInfo['model'] ?? 'Unknown',
-      appVersion: 'v1',
-      ipAddress: ipAddress,
-      userAgent: 'educat',
-    );
-
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (result['success'] && mounted) {
-      final now = DateTime.now();
-      final formattedTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-      final prefs = await SharedPreferences.getInstance();
-      final today = DateTime.now();
-      final dateKey = '${today.year}-${today.month}-${today.day}';
-      await prefs.setString('clock_in_${widget.user.id}_$dateKey', formattedTime);
-
-      setState(() {
-        _clockInTime = formattedTime;
-        _isClockedIn = true;
-        _statusMessage = '✅ Clocked in at $formattedTime';
-      });
-
-      widget.onStatusChanged();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Clocked in successfully at $formattedTime'),
-            backgroundColor: AppColors.success,
-          ),
-        );
+      if (token == null) {
+        _showError('Not authenticated. Please login again.');
+        setState(() { _isLoading = false; });
+        return;
       }
-    } else {
-      setState(() {
-        _statusMessage = '❌ ${result['message']}';
-      });
-      if (mounted) {
+
+      // Validate QR Code format
+      final qrParts = qrCodeValue.split('|');
+      if (qrParts.length != 4) {
+        _showError('Invalid QR Code format. Please scan a valid attendance QR code.');
+        setState(() { _isLoading = false; });
+        return;
+      }
+
+      if (qrParts[0] != 'SCHOOL_ATTENDANCE') {
+        _showError('This is not an attendance QR code.');
+        setState(() { _isLoading = false; });
+        return;
+      }
+
+      final qrSchoolId = qrParts[1];
+      if (qrSchoolId != widget.user.schoolId) {
+        _showError('This QR code is for a different school.');
+        setState(() { _isLoading = false; });
+        return;
+      }
+
+      // Get device info
+      final deviceInfo = await _getDeviceInfo();
+      final ipAddress = await _getIpAddress();
+
+      final result = await widget.apiService.clockIn(
+        token: token,
+        teacherId: widget.user.id,
+        schoolId: widget.user.schoolId,
+        qrCodeValue: qrCodeValue,
+        latitude: _latitude,
+        longitude: _longitude,
+        deviceModel: deviceInfo['model'] ?? 'Unknown',
+        appVersion: 'v1',
+        ipAddress: ipAddress,
+        userAgent: 'educat',
+      );
+
+      if (result['success'] && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        final today = DateTime.now();
+        final dateKey = '${today.year}-${today.month}-${today.day}';
+        final clockInKey = 'clock_in_${widget.user.id}_$dateKey';
+
+        final data = result['data'];
+        if (data != null && data['clockInTime'] != null) {
+          _clockInTime = data['clockInTime'];
+          await prefs.setString(clockInKey, _clockInTime!);
+        } else {
+          _clockInTime = DateTime.now().toIso8601String();
+          await prefs.setString(clockInKey, _clockInTime!);
+        }
+
+        _isClockedIn = true;
+        _clockOutTime = null;
+        _scannedQrCode = qrCodeValue;
+
+        setState(() {
+          _statusMessage = '✅ Clock in successful!';
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ ${result['message']}'),
-            backgroundColor: AppColors.error,
+          const SnackBar(
+            content: Text('✅ Clock in successful!'),
+            backgroundColor: Colors.green,
           ),
         );
+
+        widget.onStatusChanged();
+      } else {
+        _showError(result['message'] ?? 'Clock in failed. Please try again.');
+      }
+    } catch (e) {
+      print('Clock in error: $e');
+      _showError('Error: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
+  }
+
+  void _showError(String message) {
+    setState(() {
+      _statusMessage = '❌ $message';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   Future<void> _clockOut() async {
@@ -180,51 +434,63 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
       _statusMessage = null;
     });
 
-    final result = await widget.apiService.clockOut(
-      schoolId: widget.user.schoolId,
-      teacherId: widget.user.id,
-    );
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final token = authProvider.token;
 
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (result['success'] && mounted) {
-      final now = DateTime.now();
-      final formattedTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-      final prefs = await SharedPreferences.getInstance();
-      final today = DateTime.now();
-      final dateKey = '${today.year}-${today.month}-${today.day}';
-      await prefs.setString('clock_out_${widget.user.id}_$dateKey', formattedTime);
-
-      setState(() {
-        _clockOutTime = formattedTime;
-        _isClockedIn = false;
-        _statusMessage = '✅ Clocked out at $formattedTime';
-      });
-
-      widget.onStatusChanged();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Clocked out successfully at $formattedTime'),
-            backgroundColor: AppColors.success,
-          ),
-        );
+      if (token == null) {
+        _showError('Not authenticated. Please login again.');
+        setState(() { _isLoading = false; });
+        return;
       }
-    } else {
-      setState(() {
-        _statusMessage = '❌ ${result['message']}';
-      });
-      if (mounted) {
+
+      final result = await widget.apiService.clockOut(
+        token: token,
+        schoolId: widget.user.schoolId,
+        teacherId: widget.user.id,
+      );
+
+      if (result['success'] && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        final today = DateTime.now();
+        final dateKey = '${today.year}-${today.month}-${today.day}';
+        final clockOutKey = 'clock_out_${widget.user.id}_$dateKey';
+
+        final data = result['data'];
+        if (data != null && data['clockOutTime'] != null) {
+          _clockOutTime = data['clockOutTime'];
+          await prefs.setString(clockOutKey, _clockOutTime!);
+        } else {
+          _clockOutTime = DateTime.now().toIso8601String();
+          await prefs.setString(clockOutKey, _clockOutTime!);
+        }
+
+        _isClockedIn = false;
+        _scannedQrCode = null;
+
+        setState(() {
+          _statusMessage = '✅ Clock out successful!';
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ ${result['message']}'),
-            backgroundColor: AppColors.error,
+          const SnackBar(
+            content: Text('✅ Clock out successful!'),
+            backgroundColor: Colors.green,
           ),
         );
+
+        widget.onStatusChanged();
+      } else {
+        _showError(result['message'] ?? 'Clock out failed. Please try again.');
+      }
+    } catch (e) {
+      print('Clock out error: $e');
+      _showError('Error: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -329,7 +595,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                 Icon(Icons.login, color: Colors.white70, size: 16),
                 const SizedBox(width: 4),
                 Text(
-                  'In: $_clockInTime',
+                  'In: ${_formatTime(_clockInTime!)}',
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
@@ -338,7 +604,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                 Icon(Icons.logout, color: Colors.white70, size: 16),
                 const SizedBox(width: 4),
                 Text(
-                  'Out: $_clockOutTime',
+                  'Out: ${_formatTime(_clockOutTime!)}',
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
@@ -350,6 +616,32 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
               ],
             ],
           ),
+          if (_scannedQrCode != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.qr_code, color: Colors.white70, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'QR Code scanned',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           if (_isLoadingStatus)
             const Center(
@@ -363,114 +655,161 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
               ),
             )
           else
-            Row(
+            Column(
               children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _isLoading || _isClockedIn ? null : _clockIn,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: _isLoading && !_isClockedIn
-                        ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.primary,
-                      ),
-                    )
-                        : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.login_rounded,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Clock In',
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isLoading || _isClockedIn ? null : _showQrScanner,
+                        icon: Icon(Icons.qr_code_scanner, size: 20),
+                        label: const Text(
+                          'Scan QR',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                            fontSize: 14,
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _isLoading || !_isClockedIn ? null : _clockOut,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isClockedIn
-                          ? AppColors.error
-                          : AppColors.grey,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
                       ),
-                      elevation: 0,
                     ),
-                    child: _isLoading && _isClockedIn
-                        ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _isLoading || _isClockedIn ? null : () {
+                          // Use the scanned QR code if available, or prompt to scan
+                          if (_scannedQrCode != null) {
+                            _clockInWithQrCode(_scannedQrCode!);
+                          } else {
+                            _showQrScanner();
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: _isLoading && !_isClockedIn
+                            ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                            : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _scannedQrCode != null ? Icons.qr_code : Icons.login_rounded,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _scannedQrCode != null ? 'Clock In' : 'Clock In',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _isLoading || !_isClockedIn ? null : _clockOut,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isClockedIn
+                              ? AppColors.error
+                              : AppColors.grey,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: _isLoading && _isClockedIn
+                            ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                            : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.logout_rounded,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Clock Out',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_statusMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _statusMessage!,
+                      style: const TextStyle(
                         color: Colors.white,
+                        fontSize: 13,
                       ),
-                    )
-                        : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.logout_rounded,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Clock Out',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
+                      textAlign: TextAlign.center,
                     ),
                   ),
-                ),
+                ],
               ],
             ),
-          if (_statusMessage != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _statusMessage!,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
         ],
       ),
     );
+  }
+
+  String _formatTime(String timestamp) {
+    try {
+      final time = DateTime.parse(timestamp);
+      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return timestamp;
+    }
   }
 }
 
@@ -515,7 +854,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   Map<String, Map<String, Map<String, dynamic>>> _studentScores = {};
   bool _isSavingResults = false;
   bool _isLoadingSubjects = false;
-  bool _isSyncing = false;
 
   // News data
   List<Map<String, dynamic>> _news = [];
@@ -602,7 +940,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     });
   }
 
-  // Get responsive values based on screen size
   ResponsiveData _getResponsiveData(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isMobile = width < 600;
@@ -3089,37 +3426,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       contentPadding: EdgeInsets.symmetric(horizontal: responsive.padding, vertical: responsive.isMobile ? 8 : 12),
     );
   }
-}
-
-// Responsive data class
-class ResponsiveData {
-  final bool isMobile;
-  final bool isTablet;
-  final bool isDesktop;
-  final double padding;
-  final int gridCrossAxisCount;
-  final int quickActionsCount;
-  final double fontSizeSmall;
-  final double fontSizeMedium;
-  final double fontSizeLarge;
-  final double fontSizeHeader;
-  final double slideshowHeight;
-  final double cardElevation;
-
-  ResponsiveData({
-    required this.isMobile,
-    required this.isTablet,
-    required this.isDesktop,
-    required this.padding,
-    required this.gridCrossAxisCount,
-    required this.quickActionsCount,
-    required this.fontSizeSmall,
-    required this.fontSizeMedium,
-    required this.fontSizeLarge,
-    required this.fontSizeHeader,
-    required this.slideshowHeight,
-    required this.cardElevation,
-  });
 }
 
 // WhatsApp-style Chat List Screen for Teachers

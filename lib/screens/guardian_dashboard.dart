@@ -3195,12 +3195,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasFee)
-            IconButton(
-              icon: Icon(Icons.payment, color: AppColors.primary, size: resp.smallIconSize),
-              onPressed: () => _payFeesForPupil(pupil),
-              tooltip: 'Pay Fees',
-            ),
+          // if (hasFee)
+          //   IconButton(
+          //     icon: Icon(Icons.payment, color: AppColors.primary, size: resp.smallIconSize),
+          //     onPressed: () => _payFeesForPupil(pupil),
+          //     tooltip: 'Pay Fees',
+          //   ),
           if (hasPhone)
             IconButton(
               icon: Icon(Icons.phone, color: AppColors.success, size: resp.smallIconSize),
@@ -3217,11 +3217,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             onPressed: () => _showPupilDetails(pupil),
             tooltip: 'Details',
           ),
-          IconButton(
-            icon: Icon(Icons.discount_rounded, color: AppColors.warning, size: resp.smallIconSize),
-            onPressed: () => _showStudentDiscounts(pupil),
-            tooltip: 'View Discounts',
-          ),
+          // IconButton(
+          //   icon: Icon(Icons.discount_rounded, color: AppColors.warning, size: resp.smallIconSize),
+          //   onPressed: () => _showStudentDiscounts(pupil),
+          //   tooltip: 'View Discounts',
+          // ),
         ],
       ),
     );

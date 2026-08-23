@@ -1,8 +1,10 @@
 // screens/fee_payment_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../services/auth_provider.dart';
 import '../services/fee_provider.dart';
 import '../utils/app_colors.dart';
@@ -48,8 +50,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     super.dispose();
   }
 
-// In fee_payment_screen.dart
-
   Future<void> _calculateDiscount() async {
     setState(() {
       _isCalculating = true;
@@ -67,7 +67,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       return;
     }
 
-    // The provider will handle fetching the discount and using the correct session/term IDs
     final success = await feeProvider.calculateDiscountedFee(
       token: token,
       studentId: widget.studentId,
@@ -99,7 +98,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       return;
     }
 
-    // Validate email
     final email = _emailController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,10 +110,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       _isProcessing = true;
     });
 
-    // Use discounted fee
     final amountToPay = feeProvider.hasDiscount ? feeProvider.discountedFee : widget.originalFee;
 
-    // Show loading
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -137,7 +133,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       classroomId: widget.classroomId,
     );
 
-    // Close loading
     if (mounted) {
       Navigator.pop(context);
     }
@@ -148,24 +143,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
 
     if (success && mounted && feeProvider.checkoutUrl != null) {
       final checkoutUrl = feeProvider.checkoutUrl!;
-      final reference = feeProvider.paymentReference ?? '';
-
       print('🔗 Checkout URL: $checkoutUrl');
-      print('📝 Reference: $reference');
-
-      if (checkoutUrl.isEmpty || !checkoutUrl.startsWith('http')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid payment URL. Please try again.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        return;
-      }
-
-      // Open payment page in browser
-      _launchPaymentUrl(checkoutUrl);
-
+      await _launchPaymentUrlWithFallback(checkoutUrl);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -176,72 +155,213 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     }
   }
 
-  Future<void> _launchPaymentUrl(String url) async {
+  // ==================== PAYMENT URL LAUNCHER WITH MULTIPLE FALLBACKS ====================
+
+  Future<void> _launchPaymentUrlWithFallback(String url) async {
+    // Method 1: Try launching with custom tabs (Chrome)
+    bool launched = await _launchWithCustomTabs(url);
+    if (launched) return;
+
+    // Method 2: Try launching with external browser
+    launched = await _launchWithBrowser(url);
+    if (launched) return;
+
+    // Method 3: Try launching with platform default
+    launched = await _launchWithPlatformDefault(url);
+    if (launched) return;
+
+    // Method 4: Show dialog for manual copy-paste
+    _showManualPaymentDialog(url);
+  }
+
+  Future<bool> _launchWithCustomTabs(String url) async {
     try {
       final Uri uri = Uri.parse(url);
-
       // Check if URL can be launched
       if (await canLaunchUrl(uri)) {
-        // Launch in external browser
-        final bool launched = await launchUrl(
+        // Try with Chrome Custom Tabs
+        final bool result = await launchUrl(
           uri,
           mode: LaunchMode.externalApplication,
         );
+        if (result) {
+          print('✅ Payment page launched with Custom Tabs');
+          _showSuccessMessage();
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      print('❌ Custom Tabs launch failed: $e');
+      return false;
+    }
+  }
 
-        if (launched) {
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Payment page opened in your browser. Complete payment there.'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
+  Future<bool> _launchWithBrowser(String url) async {
+    try {
+      final Uri uri = Uri.parse(url);
+      // Try with browser
+      final bool result = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (result) {
+        print('✅ Payment page launched with Browser');
+        _showSuccessMessage();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('❌ Browser launch failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _launchWithPlatformDefault(String url) async {
+    try {
+      final Uri uri = Uri.parse(url);
+      // Try with platform default
+      final bool result = await launchUrl(
+        uri,
+        mode: LaunchMode.platformDefault,
+      );
+      if (result) {
+        print('✅ Payment page launched with Platform Default');
+        _showSuccessMessage();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('❌ Platform Default launch failed: $e');
+      return false;
+    }
+  }
+
+  void _showSuccessMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Payment page opened! Please complete your payment.'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 3),
+      ),
+    );
+
+    // Navigate back after a delay
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    });
+  }
+
+  void _showManualPaymentDialog(String url) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Open Payment Page'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.warning_amber_rounded, size: 48, color: AppColors.warning),
+            const SizedBox(height: 16),
+            const Text(
+              'We couldn\'t automatically open the payment page.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14),
             ),
-          );
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.greyLight,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                url,
+                style: const TextStyle(fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Please copy the URL and open it in your browser manually.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              // Copy URL to clipboard
+              Clipboard.setData(ClipboardData(text: url));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('URL copied to clipboard!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('Copy URL'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              // Try WebView as last resort
+              _openInWebView(url);
+            },
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text('Open in App'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.info,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          // Navigate back after a delay
-          Future.delayed(const Duration(seconds: 1), () {
-            if (mounted) {
-              Navigator.pop(context, true);
-            }
-          });
-        } else {
-          // Try fallback mode
-          final bool fallbackLaunched = await launchUrl(
-            uri,
-            mode: LaunchMode.platformDefault,
-          );
-
-          if (!fallbackLaunched && mounted) {
+  void _openInWebView(String url) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => WebViewPaymentScreen(
+          url: url,
+          onSuccess: () {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Could not open payment page. Please try again.'),
-                backgroundColor: AppColors.error,
+                content: Text('Payment successful!'),
+                backgroundColor: Colors.green,
               ),
             );
-          }
-        }
-      } else {
-        // Can't launch URL
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not open payment page. Please try again.'),
-              backgroundColor: AppColors.error,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      print('❌ Error launching URL: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    }
+            Navigator.pop(context, true);
+          },
+          onCancel: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Payment cancelled'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -320,25 +440,15 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Student Info Card
           _buildStudentInfoCard(),
           const SizedBox(height: 16),
-
-          // Fee Details Card
           _buildFeeDetailsCard(feeProvider),
           const SizedBox(height: 16),
-
-          // Email Input
           _buildEmailInput(),
           const SizedBox(height: 16),
-
-          // Gateway Selection
           _buildGatewaySelector(),
           const SizedBox(height: 24),
-
-          // Pay Button
           _buildPayButton(feeProvider, isProcessing),
-
           if (feeProvider.errorMessage != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -361,10 +471,7 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               ),
             ),
           ],
-
           const SizedBox(height: 20),
-
-          // Security Notice
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -806,6 +913,130 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── WebView Payment Screen (Fallback) ──────────────────────────────────────
+
+class WebViewPaymentScreen extends StatefulWidget {
+  final String url;
+  final VoidCallback onSuccess;
+  final VoidCallback onCancel;
+
+  const WebViewPaymentScreen({
+    Key? key,
+    required this.url,
+    required this.onSuccess,
+    required this.onCancel,
+  }) : super(key: key);
+
+  @override
+  State<WebViewPaymentScreen> createState() => _WebViewPaymentScreenState();
+}
+
+class _WebViewPaymentScreenState extends State<WebViewPaymentScreen> {
+  late final WebViewController _controller;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFFFFFFFF))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) {
+            setState(() => _isLoading = false);
+            if (url.contains('success') || url.contains('approved')) {
+              widget.onSuccess();
+            } else if (url.contains('cancel') || url.contains('cancelled')) {
+              widget.onCancel();
+            }
+          },
+          onUrlChange: (change) {
+            if (change.url != null) {
+              final url = change.url!;
+              if (url.contains('success') || url.contains('approved')) {
+                widget.onSuccess();
+              } else if (url.contains('cancel') || url.contains('cancelled')) {
+                widget.onCancel();
+              }
+            }
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pay with Paystack'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Cancel Payment'),
+                content: const Text('Are you sure you want to cancel this payment?'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Continue'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onCancel();
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              setState(() => _isLoading = true);
+              _controller.reload();
+            },
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (_isLoading)
+            Container(
+              color: Colors.white,
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'Loading payment page...',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

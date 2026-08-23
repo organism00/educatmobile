@@ -11,6 +11,24 @@ import 'login_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/notification_service.dart';
 
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const kOrange = Color(0xFFF7941D);
+const kNavy = Color(0xFF1A2340);
+const kLightOrange = Color(0xFFFFF3E8);
+const kBlue = Color(0xFF4A90D9);
+const kLightBlue = Color(0xFFEBF3FB);
+const kGreen = Color(0xFF27AE60);
+const kLightGreen = Color(0xFFE8F8EF);
+const kPurple = Color(0xFF7B61FF);
+const kLightPurple = Color(0xFFF0EEFF);
+const kRed = Color(0xFFE74C3C);
+const kBg = Color(0xFFF7F8FA);
+const kBorder = Color(0xFFEEEEEE);
+const kTextGrey = Color(0xFF888888);
+
+// ─── Dashboard Screen ────────────────────────────────────────────────────────
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
 
@@ -20,10 +38,11 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedIndex = 0;
+
+  // ==================== DATA STATES ====================
   late UserModel _currentUser;
   late ApiService _apiService;
 
-  // Data states
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _filteredStudents = [];
   List<Map<String, dynamic>> _teachers = [];
@@ -94,27 +113,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
     };
   }
-// Add this method to your Admin Dashboard class
+
+  // ==================== DATA FETCHING METHODS ====================
 
   String _getCurrentSessionId() {
-    // Try to get session ID from current user
     String sessionId = _currentUser.sessionId ?? '';
-
     if (sessionId.isEmpty) {
-      // Try to get from user model's sessionId
-      sessionId = _currentUser.sessionId ?? '';
-    }
-
-    if (sessionId.isEmpty) {
-      // Default to current academic year
       final now = DateTime.now();
       final year = now.year;
       final nextYear = year + 1;
       sessionId = '$year/$nextYear';
       print('⚠️ Using default session ID: $sessionId');
     }
-
-    print('📅 Session ID being used: $sessionId');
     return sessionId;
   }
 
@@ -159,7 +169,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     try {
-      // Get the session ID
       final sessionId = _getCurrentSessionId();
       final termId = _currentUser.termId ?? '1';
 
@@ -167,8 +176,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       print('📅 Session ID: $sessionId');
       print('📚 Term ID: $termId');
 
-      // First, get expected revenue data directly
-      print('💰 Fetching expected revenue...');
       final expectedRevenueResult = await _apiService.getExpectedRevenueForTerm(
         token: token,
         sessionId: sessionId,
@@ -194,19 +201,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'classFee': classFee,
             'numberOfStudents': numberOfStudents,
           };
-
-          print('   📚 ${classroom['className']}: Fee=₦$classFee, Students=$numberOfStudents, Expected=₦$expectedRevenue');
         }
         print('💰 Total Expected Revenue: ₦$totalExpectedRevenue');
       } else {
         print('❌ Failed to fetch expected revenue: ${expectedRevenueResult['message']}');
-        // Continue with empty expected revenue map
       }
 
-      // Then fetch classrooms with the expected revenue map
       await _fetchClassrooms(token, expectedRevenueMap);
 
-      // Then fetch all other data in parallel
       await Future.wait([
         _fetchStudents(token),
         _fetchTeachers(token),
@@ -215,7 +217,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _fetchGuardianTransactions(token),
       ]);
 
-      // After classrooms are loaded, fetch financial data for each
       await _fetchAllClassroomFinancialData(token, expectedRevenueMap, sessionId, termId);
 
       setState(() {
@@ -226,7 +227,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _isLoading = false;
       });
 
-      // Fetch guardian students mappings
       _fetchGuardianStudentsMappings(token);
 
     } catch (e) {
@@ -428,7 +428,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
           String teacherName = 'Not Assigned';
           String teacherId = '';
 
-          // Get fee amount from the expected revenue map
           final classroomInfo = expectedRevenueMap[c['classroomId']];
           double feeAmount = classroomInfo?['classFee'] ?? 0.0;
           int studentCount = classroomInfo?['numberOfStudents'] ?? 0;
@@ -567,7 +566,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     print('💰 Fetching financial data for ${_classrooms.length} classrooms...');
     print('📅 Using Session: $sessionId, Term: $termId');
 
-    // Process each classroom
     for (var classroom in _classrooms) {
       await _fetchClassroomFinancialData(token, classroom, expectedRevenueMap, sessionId, termId);
     }
@@ -578,7 +576,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
       print('✅ All classroom financial data loaded');
 
-      // Print summary
       double totalExpected = 0;
       double totalPaid = 0;
       double totalOwed = 0;
@@ -605,7 +602,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final classroomId = classroom['id'];
     final classroomName = classroom['name'] ?? 'Unknown';
 
-    // Get expected revenue from the pre-fetched data
     final expectedData = expectedRevenueMap[classroomId];
     final expectedRevenue = (expectedData?['expectedRevenue'] as double?) ?? 0.0;
     final feePerStudent = (expectedData?['classFee'] as double?) ?? 0.0;
@@ -618,7 +614,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     print('   Student Count: $studentCount');
 
     try {
-      // Get total paid amount from API
       final paidResult = await _apiService.getTotalAmountPaidInClassByTerm(
         token: token,
         classroomId: classroomId,
@@ -629,7 +624,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final totalPaid = (paidResult['data'] ?? 0.0).toDouble();
       print('   Total Paid from API: ₦$totalPaid');
 
-      // Get total debt/owed amount from API
       final debtResult = await _apiService.getTotalDebtOwedInClassByTerm(
         token: token,
         classroomId: classroomId,
@@ -640,7 +634,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final totalOwed = (debtResult['data'] ?? 0.0).toDouble();
       print('   Total Owed from API: ₦$totalOwed');
 
-      // Get students owing list
       final studentsOwingResult = await _apiService.getStudentsOwingInClassByTerm(
         token: token,
         classroomId: classroomId,
@@ -655,7 +648,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         print('   Students Owing: ${studentsOwing.length}');
       }
 
-      // Calculate collection rate
       final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
 
       print('   ✅ Final - Expected: ₦$expectedRevenue, Paid: ₦$totalPaid, Owed: ₦$totalOwed, Rate: ${collectionRate.toStringAsFixed(1)}%');
@@ -702,8 +694,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
+  // ==================== HELPER METHODS ====================
+
   String _formatCurrency(double amount) {
-    // Format with commas and 2 decimal places
     final formatter = NumberFormat.currency(
       locale: 'en_NG',
       symbol: '₦',
@@ -712,8 +705,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return formatter.format(amount);
   }
 
-
-  // Also add a simpler version for whole numbers (no decimal places)
   String _formatCurrencySimple(double amount) {
     final formatter = NumberFormat.currency(
       locale: 'en_NG',
@@ -723,6 +714,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return formatter.format(amount);
   }
 
+  String _formatNumberWithCommas(int number) {
+    final formatter = NumberFormat('#,###', 'en_US');
+    return formatter.format(number);
+  }
 
   String _formatDate(dynamic dateValue) {
     if (dateValue == null) return 'N/A';
@@ -734,7 +729,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  // Navigation methods
+  // ==================== NAVIGATION METHODS ====================
+
   void _navigateToMessages() {
     Navigator.push(
       context,
@@ -757,7 +753,39 @@ class _AdminDashboardState extends State<AdminDashboard> {
     ).then((_) => _fetchUnreadMessages());
   }
 
-  // Details Modals
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    if (phoneNumber.isEmpty || phoneNumber == 'N/A' || phoneNumber == 'Not available') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone number not available'), backgroundColor: AppColors.warning),
+      );
+      return;
+    }
+
+    String cleanNumber = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleanNumber.startsWith('0') && cleanNumber.length == 11) {
+      cleanNumber = '+234${cleanNumber.substring(1)}';
+    } else if (cleanNumber.startsWith('234') && cleanNumber.length == 13) {
+      cleanNumber = '+$cleanNumber';
+    } else if (!cleanNumber.startsWith('+')) {
+      cleanNumber = '+$cleanNumber';
+    }
+
+    final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
+    try {
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        throw 'Could not launch $phoneUri';
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  // ==================== DETAILS MODALS ====================
+
   void _showStudentDetails(Map<String, dynamic> student) {
     showModalBottomSheet(
       context: context,
@@ -780,7 +808,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
+                      color: kOrange,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -824,7 +852,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         icon: const Icon(Icons.message),
                         label: const Text('Message Guardian'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: kOrange,
+                          foregroundColor: Colors.white,
                         ),
                       ),
                     ),
@@ -860,7 +889,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
+                      color: kOrange,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -901,7 +930,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             },
                             icon: const Icon(Icons.message),
                             label: const Text('Message'),
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -954,7 +983,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
+                      color: kOrange,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -988,8 +1017,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.05),
+                          color: kOrange.withOpacity(0.05),
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: kOrange.withOpacity(0.2)),
                         ),
                         child: Row(
                           children: [
@@ -1074,7 +1104,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             },
                             icon: const Icon(Icons.message),
                             label: const Text('Message'),
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1088,6 +1118,107 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             ),
                           ),
                       ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showClassroomDetails(Map<String, dynamic> classroom) {
+    final financialData = _classroomFinancialData[classroom['id']] ?? {};
+    final studentsOwing = List<Map<String, dynamic>>.from(financialData['studentsOwing'] ?? []);
+    final studentCount = financialData['studentCount'] ?? 0;
+    final feeAmount = classroom['feeAmount'] ?? 0.0;
+    final expectedRevenue = financialData['expectedRevenue'] ?? 0.0;
+    final totalPaid = financialData['totalPaid'] ?? 0.0;
+    final totalOwed = financialData['totalOwed'] ?? 0.0;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    classroom['name'],
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: kOrange,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, size: 24),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoCard([
+                      _buildInfoRow('Teacher', classroom['teacherName']),
+                      _buildInfoRow('Total Students', studentCount.toString()),
+                      _buildInfoRow('Fee per Student', _formatCurrency(feeAmount)),
+                    ]),
+                    const SizedBox(height: 16),
+                    _buildFinancialSummaryCard(
+                      expectedRevenue: expectedRevenue,
+                      totalPaid: totalPaid,
+                      totalOwed: totalOwed,
+                      feeAmount: feeAmount,
+                      studentCount: studentCount,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Students Owing (${studentsOwing.length})',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    studentsOwing.isEmpty
+                        ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Column(
+                          children: [
+                            Icon(Icons.check_circle, size: 48, color: AppColors.success),
+                            SizedBox(height: 8),
+                            Text('No students are owing!'),
+                          ],
+                        ),
+                      ),
+                    )
+                        : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: studentsOwing.length,
+                      itemBuilder: (context, index) {
+                        final student = studentsOwing[index];
+                        return _buildStudentOwingCard(student);
+                      },
                     ),
                   ],
                 ),
@@ -1123,48 +1254,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: isClickable ? AppColors.primary : AppColors.textPrimary,
+                  color: isClickable ? kOrange : AppColors.textPrimary,
                   decoration: isClickable ? TextDecoration.underline : null,
                 ),
               ),
             ),
             if (isClickable && value.isNotEmpty && value != 'N/A' && value != 'Not available')
-              Icon(Icons.phone, size: 16, color: AppColors.primary),
+              Icon(Icons.phone, size: 16, color: kOrange),
           ],
         ),
       ),
     );
-  }
-
-  Future<void> _makePhoneCall(String phoneNumber) async {
-    if (phoneNumber.isEmpty || phoneNumber == 'N/A' || phoneNumber == 'Not available') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
-
-    String cleanNumber = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (cleanNumber.startsWith('0') && cleanNumber.length == 11) {
-      cleanNumber = '+234${cleanNumber.substring(1)}';
-    } else if (cleanNumber.startsWith('234') && cleanNumber.length == 13) {
-      cleanNumber = '+$cleanNumber';
-    } else if (!cleanNumber.startsWith('+')) {
-      cleanNumber = '+$cleanNumber';
-    }
-
-    final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
-    try {
-      if (await canLaunchUrl(phoneUri)) {
-        await launchUrl(phoneUri);
-      } else {
-        throw 'Could not launch $phoneUri';
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: AppColors.error),
-      );
-    }
   }
 
   Widget _buildInfoCard(List<Widget> children) {
@@ -1172,8 +1272,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
+        color: kLightOrange,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOrange.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1255,108 +1356,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-
-  void _showClassroomDetails(Map<String, dynamic> classroom) {
-    final financialData = _classroomFinancialData[classroom['id']] ?? {};
-    final studentsOwing = List<Map<String, dynamic>>.from(financialData['studentsOwing'] ?? []);
-    final studentCount = financialData['studentCount'] ?? 0;
-    final feeAmount = classroom['feeAmount'] ?? 0.0;
-    final expectedRevenue = financialData['expectedRevenue'] ?? 0.0;
-    final totalPaid = financialData['totalPaid'] ?? 0.0;
-    final totalOwed = financialData['totalOwed'] ?? 0.0;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    classroom['name'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 24),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildInfoCard([
-                      _buildInfoRow('Teacher', classroom['teacherName']),
-                      _buildInfoRow('Total Students', studentCount.toString()),
-                      _buildInfoRow('Fee per Student', _formatCurrency(feeAmount)),
-                    ]),
-                    const SizedBox(height: 16),
-                    _buildFinancialSummaryCard(
-                      expectedRevenue: expectedRevenue,
-                      totalPaid: totalPaid,
-                      totalOwed: totalOwed,
-                      feeAmount: feeAmount,  // Pass feeAmount
-                      studentCount: studentCount,  // Pass studentCount
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Students Owing (${studentsOwing.length})',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    studentsOwing.isEmpty
-                        ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(32),
-                        child: Column(
-                          children: [
-                            Icon(Icons.check_circle, size: 48, color: AppColors.success),
-                            SizedBox(height: 8),
-                            Text('No students are owing!'),
-                          ],
-                        ),
-                      ),
-                    )
-                        : ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: studentsOwing.length,
-                      itemBuilder: (context, index) {
-                        final student = studentsOwing[index];
-                        return _buildStudentOwingCard(student);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildFinancialSummaryCard({
     required double expectedRevenue,
     required double totalPaid,
@@ -1370,8 +1369,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
+        color: kLightOrange,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOrange.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1389,6 +1389,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.info.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.info.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
@@ -1421,6 +1422,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.success.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.success.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
@@ -1448,6 +1450,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.error.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.error.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
@@ -1587,6 +1590,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ==================== UI BUILD METHODS ====================
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1595,136 +1600,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _isDesktop = screenWidth >= 1200;
 
     return Scaffold(
-      body: Container(
-        color: AppColors.background,
-        child: SafeArea(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-              : _errorMessage != null
-              ? _buildErrorView()
-              : RefreshIndicator(
-            onRefresh: _refreshData,
-            color: AppColors.primary,
-            child: Row(
-              children: [
-                if (_isDesktop || _isTablet)
-                  Container(
-                    width: _isDesktop ? 280 : 250,
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                        ),
-                      ],
-                    ),
-                    child: _buildSideNavigation(),
-                  ),
-                Expanded(
-                  child: _selectedIndex == 0
-                      ? _buildHomeScreen()
-                      : _buildScreenForIndex(_selectedIndex),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      bottomNavigationBar: (_isLoading || _errorMessage != null || _isDesktop || _isTablet)
-          ? null
-          : _buildBottomNavigationBar(),
-    );
-  }
-
-  Widget _buildSideNavigation() {
-    final List<Map<String, dynamic>> navItems = [
-      {'icon': Icons.dashboard_rounded, 'label': 'Overview', 'index': 0},
-      {'icon': Icons.class_rounded, 'label': 'Classrooms', 'index': 1},
-      {'icon': Icons.school_rounded, 'label': 'Students', 'index': 2},
-      {'icon': Icons.person_rounded, 'label': 'Teachers', 'index': 3},
-      {'icon': Icons.family_restroom_rounded, 'label': 'Guardians', 'index': 4},
-      {'icon': Icons.message_rounded, 'label': 'Messages', 'index': 5},
-      {'icon': Icons.settings_rounded, 'label': 'Settings', 'index': 6},
-    ];
-
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(20),
+      backgroundColor: kBg,
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: kOrange))
+            : _errorMessage != null
+            ? _buildErrorView()
+            : RefreshIndicator(
+          onRefresh: _refreshData,
+          color: kOrange,
           child: Column(
             children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  gradient: AppColors.cardGradient,
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Icon(Icons.school, size: 30, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _currentUser.schoolName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _currentUser.schoolReg,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
+              _buildTopBar(),
+              Expanded(
+                child: _selectedIndex == 0
+                    ? _buildHomeScreen()
+                    : _buildScreenWithBackButton(_selectedIndex),
               ),
             ],
           ),
         ),
-        const Divider(),
-        Expanded(
-          child: ListView.builder(
-            itemCount: navItems.length,
-            itemBuilder: (context, index) {
-              final item = navItems[index];
-              final isSelected = _selectedIndex == item['index'];
-              return ListTile(
-                leading: Icon(
-                  item['icon'],
-                  color: isSelected ? AppColors.primary : AppColors.grey,
-                  size: 24,
-                ),
-                title: Text(
-                  item['label'],
-                  style: TextStyle(
-                    color: isSelected ? AppColors.primary : AppColors.textPrimary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                ),
-                selected: isSelected,
-                selectedTileColor: AppColors.primary.withOpacity(0.05),
-                onTap: () => setState(() => _selectedIndex = item['index']),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              );
-            },
-          ),
-        ),
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.logout, color: AppColors.error),
-          title: const Text('Logout', style: TextStyle(color: AppColors.error)),
-          onTap: _showLogoutDialog,
-        ),
-        const SizedBox(height: 20),
-      ],
+      ),
     );
   }
 
@@ -1739,7 +1635,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _fetchDashboardData,
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
             child: const Text('Retry'),
           ),
         ],
@@ -1747,251 +1643,253 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildBottomNavigationBar() {
+  // ── Top Bar ────────────────────────────────────────────────────────────────
+
+  Widget _buildTopBar() {
+    // Show back button if not on home screen
+    final bool showBackButton = _selectedIndex != 0;
+
     return Container(
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)],
-        ),
-        child: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            backgroundColor: Colors.transparent,
-            selectedItemColor: AppColors.primary,
-            unselectedItemColor: AppColors.grey,
-            currentIndex: _selectedIndex,
-            elevation: 0,
-            onTap: (index) => setState(() => _selectedIndex = index),
-            items: [
-        const BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded), label: 'Overview'),
-    const BottomNavigationBarItem(icon: Icon(Icons.class_rounded), label: 'Classrooms'),
-    const BottomNavigationBarItem(icon: Icon(Icons.school_rounded), label: 'Students'),
-    const BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Teachers'),
-    const BottomNavigationBarItem(icon: Icon(Icons.family_restroom_rounded), label: 'Guardians'),
-    BottomNavigationBarItem(
-    icon: Stack(
-    children: [
-    const Icon(Icons.message_rounded),
-    if (_unreadMessageCount > 0)
-    Positioned(
-    right: 0,
-    top: 0,
-    child: Container(
-    padding: const EdgeInsets.all(2),
-    decoration: const BoxDecoration(
-    color: Colors.red,
-    shape: BoxShape.circle,
-    ),
-    constraints: const BoxConstraints(
-    minWidth: 12,
-    minHeight: 12,
-    ),
-    child: Text(
-    '$_unreadMessageCount',
-    style: const TextStyle(
-    color: Colors.white,
-    fontSize: 8,
-    ),
-    textAlign: TextAlign.center,
-    ),
-    ),
-    ),
-    ],
-    ),
-    label: 'Messages',
-    ),
-    const BottomNavigationBarItem(icon: Icon(Icons.settings_rounded), label: 'Settings'),
-    ],
-    ),
-    );
-  }
-  Widget _buildHomeScreen() {
-    int totalStudents = _students.length;
-    int totalTeachers = _teachers.length;
-    int totalGuardians = _guardianCount;
-    int totalClassrooms = _classrooms.length;
-
-    double totalExpected = 0;
-    double totalPaid = 0;
-    double totalOwed = 0;
-
-    // Calculate totals from classroom financial data
-    for (var classroom in _classrooms) {
-      final financialData = _classroomFinancialData[classroom['id']] ?? {};
-      final expected = (financialData['expectedRevenue'] as double?) ?? 0;
-      final paid = (financialData['totalPaid'] as double?) ?? 0;
-      final owed = (financialData['totalOwed'] as double?) ?? 0;
-
-      totalExpected += expected;
-      totalPaid += paid;
-      totalOwed += owed;
-
-      print('📊 ${classroom['name']}: Expected=₦$expected, Paid=₦$paid, Owed=₦$owed');
-    }
-
-    print('📊 Dashboard Totals:');
-    print('   Total Expected: ₦$totalExpected');
-    print('   Total Paid: ₦$totalPaid');
-    print('   Total Owed: ₦$totalOwed');
-
-    double collectionRate = totalExpected > 0 ? (totalPaid / totalExpected) * 100 : 0;
-
-    int statsColumns = _isMobile ? 2 : (_isTablet ? 3 : 4);
-    int classroomsColumns = _isMobile ? 1 : (_isTablet ? 2 : 3);
-
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.all(_isMobile ? 12 : 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
         children: [
-          _buildHeader(),
-          const SizedBox(height: 16),
-          _buildSchoolInfoCard(),
-          const SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: statsColumns,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.2,
+          // Back Button (if not on home)
+          if (showBackButton)
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: kOrange),
+              onPressed: () => setState(() => _selectedIndex = 0),
+              tooltip: 'Back to Dashboard',
             ),
-            itemCount: 8,
-            itemBuilder: (context, index) {
-              final stats = [
-                {'title': 'Total Students', 'value': totalStudents.toString(), 'icon': Icons.people, 'color': AppColors.primary},
-                {'title': 'Total Teachers', 'value': totalTeachers.toString(), 'icon': Icons.person, 'color': AppColors.info},
-                {'title': 'Total Guardians', 'value': totalGuardians.toString(), 'icon': Icons.family_restroom, 'color': AppColors.success},
-                {'title': 'Total Classes', 'value': totalClassrooms.toString(), 'icon': Icons.class_, 'color': AppColors.warning},
-                {'title': 'Expected Revenue', 'value': _formatCurrency(totalExpected), 'icon': Icons.attach_money, 'color': AppColors.info},
-                {'title': 'Amount Paid', 'value': _formatCurrency(totalPaid), 'icon': Icons.payment, 'color': AppColors.success},
-                {'title': 'Amount Owed', 'value': _formatCurrency(totalOwed), 'icon': Icons.warning, 'color': AppColors.error},
-                {'title': 'Collection Rate', 'value': '${collectionRate.toStringAsFixed(1)}%', 'icon': Icons.trending_up, 'color': AppColors.primary},
-              ];
-              final stat = stats[index];
-              return _buildStatCard(stat['title'] as String, stat['value'] as String, stat['icon'] as IconData, stat['color'] as Color);
-            },
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Classrooms Overview',
-                style: TextStyle(
-                  fontSize: _isMobile ? 16 : 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
+
+          // Menu (only on home)
+          if (!showBackButton)
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: kBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kBorder),
               ),
-              if (_classrooms.length > classroomsColumns)
-                TextButton(
-                  onPressed: () => setState(() => _selectedIndex = 1),
-                  child: const Text('View All'),
-                ),
+              child: const Icon(Icons.menu, color: kNavy, size: 20),
+            ),
+
+          const Spacer(),
+
+          // Logo
+          Column(
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.school, color: kNavy, size: 20),
+                  const SizedBox(width: 4),
+                  RichText(
+                    text: const TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Edu',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: kNavy,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Cat',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: kOrange,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const Text(
+                'Empowering Schools, Transforming Lives',
+                style: TextStyle(fontSize: 9, color: kTextGrey),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          _classrooms.isEmpty
-              ? Container(
-            padding: const EdgeInsets.all(40),
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(16),
+
+          const Spacer(),
+
+          // Screen Title (when back button is shown)
+          if (showBackButton)
+            Text(
+              _getScreenTitle(),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: kNavy,
+              ),
             ),
-            child: Column(
+
+          if (!showBackButton)
+            Stack(
               children: [
-                Icon(Icons.class_rounded, size: 48, color: AppColors.grey),
-                const SizedBox(height: 12),
-                Text(
-                  'No classrooms added yet',
-                  style: TextStyle(
-                    fontSize: _isMobile ? 14 : 16,
-                    color: AppColors.textSecondary,
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: kBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: kBorder),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.notifications_outlined, color: kNavy, size: 20),
+                    onPressed: _navigateToMessages,
+                    padding: EdgeInsets.zero,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Classrooms will appear here once added',
-                  style: TextStyle(
-                    fontSize: _isMobile ? 12 : 13,
-                    color: AppColors.textSecondary,
+                if (_unreadMessageCount > 0)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: kRed,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                   ),
-                ),
               ],
             ),
-          )
-              : GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: classroomsColumns,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: _isMobile ? 1.2 : 1.3,
+
+          if (!showBackButton) const SizedBox(width: 10),
+
+          // Avatar (only on home)
+          if (!showBackButton)
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: kLightOrange,
+              child: Icon(Icons.person, color: kOrange, size: 22),
             ),
-            itemCount: _classrooms.length > 3 ? 3 : _classrooms.length,
-            itemBuilder: (context, index) {
-              final classroom = _classrooms[index];
-              final financialData = _classroomFinancialData[classroom['id']] ?? {};
 
-              final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
-              final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
-              final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
-
-              return _buildClassroomCard(classroom, expectedRevenue, totalPaid, totalOwed);
-            },
-          ),
+          // Logout button (only when back button is shown)
+          if (showBackButton)
+            IconButton(
+              icon: const Icon(Icons.logout_rounded, color: AppColors.error),
+              onPressed: _showLogoutDialog,
+            ),
         ],
       ),
     );
   }
 
+  String _getScreenTitle() {
+    switch (_selectedIndex) {
+      case 1: return 'Classrooms';
+      case 2: return 'Students';
+      case 3: return 'Teachers';
+      case 4: return 'Guardians';
+      case 5: return 'Messages';
+      case 6: return 'Settings';
+      default: return '';
+    }
+  }
 
-  Widget _buildSchoolInfoCard() {
-    final sessionId = _getCurrentSessionId();
-    final termId = _currentUser.termId ?? '1';
+  Widget _buildScreenWithBackButton(int index) {
+    // Wrap each screen with a back button handler
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        // Swipe right to go back
+        if (details.primaryVelocity != null && details.primaryVelocity! > 0) {
+          setState(() {
+            _selectedIndex = 0;
+          });
+        }
+      },
+      child: _buildScreenForIndex(index),
+    );
+  }
 
+  // ── Greeting Banner ────────────────────────────────────────────────────────
+
+  Widget _buildGreetingBanner() {
     return Container(
-      padding: EdgeInsets.all(_isMobile ? 12 : 16),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradient,
-        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF7941D), Color(0xFFFFB347)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
+      child: Stack(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.business, size: 28, color: Colors.white),
+          Positioned(
+            right: -10,
+            top: -10,
+            bottom: -10,
+            child: Opacity(
+              opacity: 0.2,
+              child: Icon(
+                Icons.account_balance,
+                size: 140,
+                color: Colors.white,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _currentUser.schoolName,
-                      style: TextStyle(
-                        fontSize: _isMobile ? 16 : 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Hello, ${_currentUser.name.split(' ').first}!',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
                     ),
+                  ),
+                  const Text(' 👋', style: TextStyle(fontSize: 16)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'School Administrator!',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Here's what's happening at ${_currentUser.schoolName} today.",
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.white,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.calendar_today, color: Colors.white, size: 14),
+                    const SizedBox(width: 6),
                     Text(
-                      'Reg: ${_currentUser.schoolReg}',
-                      style: TextStyle(
-                        fontSize: _isMobile ? 11 : 12,
-                        color: Colors.white.withOpacity(0.8),
+                      _getCurrentSessionId(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
                       ),
                     ),
                   ],
@@ -1999,205 +1897,197 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        termId,
-                        style: TextStyle(
-                          fontSize: _isMobile ? 11 : 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const Text('Term', style: TextStyle(fontSize: 10, color: Colors.white70)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        sessionId,
-                        style: TextStyle(
-                          fontSize: _isMobile ? 11 : 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const Text('Session', style: TextStyle(fontSize: 10, color: Colors.white70)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  // ── Section Header ─────────────────────────────────────────────────────────
+
+  Widget _buildSectionHeader(String title, String? actionLabel) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Welcome back,',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: _isMobile ? 12 : 14),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _currentUser.name.split(' ').first,
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: _isMobile ? 20 : 24,
-                  fontWeight: FontWeight.bold,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              Text(
-                'School Administrator',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: _isMobile ? 11 : 12,
-                ),
-              ),
-            ],
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: kNavy,
           ),
         ),
-        Stack(
-          children: [
-            Container(
-              width: _isMobile ? 45 : 55,
-              height: _isMobile ? 45 : 55,
-              decoration: BoxDecoration(
-                gradient: AppColors.cardGradient,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 10)],
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.message, size: _isMobile ? 24 : 30, color: Colors.white),
-                onPressed: _navigateToMessages,
+        if (actionLabel != null)
+          GestureDetector(
+            onTap: actionLabel == 'View All' ? () => setState(() => _selectedIndex = 1) : null,
+            child: Text(
+              actionLabel,
+              style: const TextStyle(
+                color: kPurple,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
               ),
             ),
-            if (_unreadMessageCount > 0)
-              Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  constraints: const BoxConstraints(
-                    minWidth: 16,
-                    minHeight: 16,
-                  ),
-                  child: Text(
-                    '$_unreadMessageCount',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
+          ),
+      ],
+    );
+  }
+
+  // ── Stats Grid ─────────────────────────────────────────────────────────────
+
+  Widget _buildStatsGrid() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                icon: Icons.group,
+                iconColor: kOrange,
+                iconBg: kLightOrange,
+                count: _students.length.toString(),
+                label: 'Students',
+                subLabel: 'Across all classes',
               ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildStatCard(
+                icon: Icons.person,
+                iconColor: kBlue,
+                iconBg: kLightBlue,
+                count: _teachers.length.toString(),
+                label: 'Teachers',
+                subLabel: 'Teaching your children',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                icon: Icons.people_alt,
+                iconColor: kGreen,
+                iconBg: kLightGreen,
+                count: _guardianCount.toString(),
+                label: 'Guardians',
+                subLabel: 'Linked to your children',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildStatCard(
+                icon: Icons.menu_book,
+                iconColor: kPurple,
+                iconBg: kLightPurple,
+                count: _classrooms.length.toString(),
+                label: 'Classrooms',
+                subLabel: 'Your children are in',
+              ),
+            ),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    // For currency values, format them nicely
-    String displayValue = value;
-    if (title.contains('Revenue') || title.contains('Paid') || title.contains('Owed')) {
-      // If it's a currency value and starts with ₦, re-format it
-      if (value.startsWith('₦')) {
-        try {
-          final numValue = double.parse(value.replaceAll('₦', '').replaceAll(',', ''));
-          displayValue = _formatCurrencySimple(numValue);
-        } catch (e) {
-          displayValue = value;
-        }
-      }
-    }
-
+  Widget _buildStatCard({
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBg,
+    required String count,
+    required String label,
+    required String subLabel,
+  }) {
     return Container(
-      padding: EdgeInsets.all(_isMobile ? 10 : 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
-          Icon(icon, size: _isMobile ? 22 : 26, color: color),
-          const SizedBox(height: 4),
-          Text(
-            displayValue,
-            style: TextStyle(
-              fontSize: _isMobile ? 14 : 16,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(12),
             ),
-            textAlign: TextAlign.center,
+            child: Icon(icon, color: iconColor, size: 22),
           ),
-          const SizedBox(height: 2),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: _isMobile ? 10 : 11,
-              color: AppColors.textSecondary,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  count,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: kNavy,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: kNavy,
+                  ),
+                ),
+                Text(
+                  subLabel,
+                  style: const TextStyle(fontSize: 11, color: kTextGrey),
+                ),
+              ],
             ),
-            textAlign: TextAlign.center,
           ),
+          const Icon(Icons.chevron_right, color: kTextGrey, size: 18),
         ],
       ),
     );
   }
 
-  Widget _buildClassroomCard(Map<String, dynamic> classroom, double expectedRevenue, double totalPaid, double totalOwed) {
-    final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
-    final studentCount = _classroomFinancialData[classroom['id']]?['studentCount'] ?? 0;
-    final feeAmount = classroom['feeAmount'] ?? 0.0;
+  // ── Financial Overview ─────────────────────────────────────────────────────
+
+  Widget _buildFinancialOverview() {
+    double totalExpected = 0;
+    double totalPaid = 0;
+    double totalOwed = 0;
+
+    for (var classroom in _classrooms) {
+      final financialData = _classroomFinancialData[classroom['id']] ?? {};
+      totalExpected += (financialData['expectedRevenue'] as double?) ?? 0;
+      totalPaid += (financialData['totalPaid'] as double?) ?? 0;
+      totalOwed += (financialData['totalOwed'] as double?) ?? 0;
+    }
+
+    double collectionRate = totalExpected > 0 ? (totalPaid / totalExpected) * 100 : 0;
 
     return Container(
-      padding: EdgeInsets.all(_isMobile ? 12 : 14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: kBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2205,221 +2095,560 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Row(
             children: [
               Container(
-                width: 45,
-                height: 45,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  gradient: AppColors.cardGradient,
-                  borderRadius: BorderRadius.circular(12),
+                  color: kLightOrange,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.class_, size: 24, color: Colors.white),
+                child: const Icon(Icons.wallet, color: kOrange, size: 18),
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      classroom['name'],
-                      style: TextStyle(
-                        fontSize: _isMobile ? 14 : 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      'Teacher: ${classroom['teacherName']}',
-                      style: TextStyle(
-                        fontSize: _isMobile ? 10 : 11,
-                        color: AppColors.textSecondary,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      '${_formatNumberWithCommas(studentCount)} Students × ${_formatCurrencySimple(feeAmount)}',
-                      style: TextStyle(
-                        fontSize: _isMobile ? 9 : 10,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
+              const Text(
+                'Financial Overview',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: kNavy,
                 ),
               ),
+              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: collectionRate >= 70
-                      ? AppColors.success.withOpacity(0.1)
-                      : (collectionRate >= 40
-                      ? AppColors.warning.withOpacity(0.1)
-                      : AppColors.error.withOpacity(0.1)),
-                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kOrange),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${collectionRate.toStringAsFixed(0)}%',
+                  '${collectionRate.toStringAsFixed(0)}% Collection',
                   style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: collectionRate >= 70
-                        ? AppColors.success
-                        : (collectionRate >= 40
-                        ? AppColors.warning
-                        : AppColors.error),
+                    color: kOrange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          const SizedBox(height: 16),
+          Row(
             children: [
-              _buildClassroomChip('Expected', _formatCurrencySimple(expectedRevenue), Icons.trending_up, color: AppColors.info),
-              _buildClassroomChip('Paid', _formatCurrencySimple(totalPaid), Icons.payment, color: AppColors.success),
-              _buildClassroomChip('Owed', _formatCurrencySimple(totalOwed), Icons.warning, color: AppColors.error),
+              Expanded(
+                child: _buildFinanceCard(
+                  label: 'Expected',
+                  amount: _formatCurrencySimple(totalExpected),
+                  amountColor: kBlue,
+                  icon: Icons.pie_chart_outline,
+                  iconColor: kBlue,
+                  bgColor: kLightBlue,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildFinanceCard(
+                  label: 'Paid',
+                  amount: _formatCurrencySimple(totalPaid),
+                  amountColor: kGreen,
+                  icon: Icons.check_circle_outline,
+                  iconColor: kGreen,
+                  bgColor: kLightGreen,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildFinanceCard(
+                  label: 'Owed',
+                  amount: _formatCurrencySimple(totalOwed),
+                  amountColor: kRed,
+                  icon: Icons.error_outline,
+                  iconColor: kRed,
+                  bgColor: const Color(0xFFFDEDEB),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _showClassroomDetails(classroom),
-              icon: Icon(Icons.visibility, size: _isMobile ? 16 : 18),
-              label: const Text('View Details'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side: const BorderSide(color: AppColors.primary),
-                padding: EdgeInsets.symmetric(vertical: _isMobile ? 8 : 10),
+          const SizedBox(height: 14),
+          const Divider(color: kBorder, height: 1),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Outstanding Balance: ${_formatCurrencySimple(totalOwed)}',
+                style: const TextStyle(fontSize: 12, color: kTextGrey),
               ),
-            ),
+              Text(
+                '${collectionRate.toStringAsFixed(0)}% Paid',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: collectionRate >= 70 ? kGreen : kOrange,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-// Helper method to format numbers with commas
-  String _formatNumberWithCommas(int number) {
-    final formatter = NumberFormat('#,###', 'en_US');
-    return formatter.format(number);
-  }
-
-  Widget _buildClassroomChip(String label, String value, IconData icon, {Color? color}) {
+  Widget _buildFinanceCard({
+    required String label,
+    required String amount,
+    required Color amountColor,
+    required IconData icon,
+    required Color iconColor,
+    required Color bgColor,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: (color ?? AppColors.primary).withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 12, color: color ?? AppColors.primary),
-          const SizedBox(width: 4),
           Text(
-            '$label: $value',
+            label,
+            style: const TextStyle(fontSize: 11, color: kTextGrey),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            amount,
             style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-              color: color ?? AppColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: amountColor,
             ),
           ),
+          const SizedBox(height: 8),
+          Icon(icon, color: iconColor, size: 20),
         ],
       ),
     );
   }
-  // ==================== STUDENTS SCREEN ====================
 
-  Widget _buildStudentsScreen() {
-    if (_students.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.school_rounded, size: 64, color: AppColors.grey),
-            const SizedBox(height: 16),
-            const Text('No students found'),
-            const SizedBox(height: 8),
-            Text(
-              'Students will appear here once added',
-              style: TextStyle(fontSize: _isMobile ? 12 : 13, color: AppColors.textSecondary),
-            ),
-          ],
+  // ── Quick Actions ──────────────────────────────────────────────────────────
+
+  Widget _buildQuickActions() {
+    final actions = [
+      {'icon': Icons.people, 'label': 'Students', 'color': kOrange, 'bg': kLightOrange, 'index': 2},
+      {'icon': Icons.person, 'label': 'Teachers', 'color': kBlue, 'bg': kLightBlue, 'index': 3},
+      {'icon': Icons.class_, 'label': 'Classes', 'color': kPurple, 'bg': kLightPurple, 'index': 1},
+      {'icon': Icons.family_restroom, 'label': 'Guardians', 'color': kGreen, 'bg': kLightGreen, 'index': 4},
+      {'icon': Icons.message, 'label': 'Messages', 'color': kOrange, 'bg': kLightOrange, 'index': 5},
+      {'icon': Icons.settings, 'label': 'Settings', 'color': kNavy, 'bg': kLightOrange, 'index': 6},
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: actions.map((action) {
+        return GestureDetector(
+          onTap: () {
+            final index = action['index'] as int;
+            if (index == 5) {
+              _navigateToMessages();
+            } else {
+              setState(() {
+                _selectedIndex = index;
+              });
+            }
+          },
+          child: Column(
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: (action['bg'] as Color),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: (action['color'] as Color).withOpacity(0.2), width: 1),
+                ),
+                child: Icon(
+                  action['icon'] as IconData,
+                  color: action['color'] as Color,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  action['label'] as String,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: kNavy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── Classroom List ─────────────────────────────────────────────────────────
+
+  Widget _buildClassroomList() {
+    if (_classrooms.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(40),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kBorder),
+        ),
+        child: const Center(
+          child: Text(
+            'No classrooms available',
+            style: TextStyle(color: kTextGrey),
+          ),
         ),
       );
     }
 
     return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.all(_isMobile ? 12 : 16),
-          color: AppColors.white,
-          child: TextField(
-            controller: _studentSearchController,
-            onChanged: _filterStudents,
-            decoration: InputDecoration(
-              hintText: 'Search by name, admission, class, guardian, or teacher...',
-              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
-              prefixIcon: Icon(Icons.search, color: AppColors.primary, size: _isMobile ? 20 : 22),
-              suffixIcon: _studentSearchController.text.isNotEmpty
-                  ? IconButton(
-                icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
-                onPressed: () {
-                  _studentSearchController.clear();
-                  _filterStudents('');
-                },
-              )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+      children: _classrooms.map((classroom) {
+        final financialData = _classroomFinancialData[classroom['id']] ?? {};
+        final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
+        final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
+        final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
+        final studentCount = financialData['studentCount'] ?? 0;
+        final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
+
+        return _buildClassroomItem(
+          color: kOrange,
+          className: classroom['name'],
+          students: '$studentCount student${studentCount != 1 ? 's' : ''}',
+          paid: _formatCurrencySimple(totalPaid),
+          owed: _formatCurrencySimple(totalOwed),
+          percent: '${collectionRate.toStringAsFixed(0)}%',
+          onTap: () => _showClassroomDetails(classroom),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildClassroomItem({
+    required Color color,
+    required String className,
+    required String students,
+    required String paid,
+    required String owed,
+    required String percent,
+    VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
               ),
-              filled: true,
-              fillColor: AppColors.greyLight,
-              contentPadding: EdgeInsets.symmetric(
-                vertical: _isMobile ? 10 : 12,
-                horizontal: 16,
+              child: const Icon(Icons.school, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    className,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: kNavy,
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 12, color: kTextGrey),
+                      const SizedBox(width: 3),
+                      Text(
+                        students,
+                        style: const TextStyle(fontSize: 12, color: kTextGrey),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(
+                        'Paid: $paid',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: kGreen,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Owed: $owed',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: kRed,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                border: Border.all(color: kOrange, width: 1.5),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  percent,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: kOrange,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right, color: kTextGrey, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Bottom Nav ─────────────────────────────────────────────────────────────
+
+  Widget _buildBottomNav() {
+    final items = [
+      _NavItem(icon: Icons.home_rounded, label: 'Home', index: 0),
+      _NavItem(icon: Icons.class_rounded, label: 'Classes', index: 1),
+      _NavItem(icon: Icons.people_alt_outlined, label: 'Students', index: 2),
+      _NavItem(icon: Icons.person_rounded, label: 'Teachers', index: 3),
+      _NavItem(icon: Icons.family_restroom_rounded, label: 'Guardians', index: 4),
+      _NavItem(icon: Icons.message_rounded, label: 'Messages', index: 5, isMessages: true),
+      _NavItem(icon: Icons.settings_rounded, label: 'Settings', index: 6),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: kBorder)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(items.length, (i) {
+              final item = items[i];
+              final selected = _selectedIndex == item.index;
+              return GestureDetector(
+                onTap: () {
+                  if (item.isMessages == true) {
+                    _navigateToMessages();
+                  } else {
+                    setState(() {
+                      _selectedIndex = item.index;
+                    });
+                  }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: SizedBox(
+                  width: 50,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        item.icon,
+                        color: selected ? kOrange : kTextGrey,
+                        size: 24,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        item.label,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                          color: selected ? kOrange : kTextGrey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==================== SCREEN BUILDERS ====================
+
+  Widget _buildHomeScreen() {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.all(_isMobile ? 12 : 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildGreetingBanner(),
+          const SizedBox(height: 24),
+          _buildSectionHeader('At a Glance', 'View All'),
+          const SizedBox(height: 14),
+          _buildStatsGrid(),
+          const SizedBox(height: 24),
+          _buildFinancialOverview(),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Quick Actions', null),
+          const SizedBox(height: 16),
+          _buildQuickActions(),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Classrooms', 'View All'),
+          const SizedBox(height: 14),
+          _buildClassroomList(),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScreenForIndex(int index) {
+    switch (index) {
+      case 1:
+        return _buildClassroomsScreen();
+      case 2:
+        return _buildStudentsScreen();
+      case 3:
+        return _buildTeachersScreen();
+      case 4:
+        return _buildGuardiansScreen();
+      case 5:
+        return _buildMessagesScreen();
+      case 6:
+        return _buildSettingsScreen();
+      default:
+        return _buildHomeScreen();
+    }
+  }
+
+  Widget _buildClassroomsScreen() {
+    if (_classrooms.isEmpty) {
+      return _buildEmptyScreen('No classrooms found', 'Classrooms will appear here once added', Icons.class_rounded);
+    }
+
+    int classroomsColumns = _isMobile ? 1 : (_isTablet ? 2 : 3);
+
+    return Column(
+      children: [
+        _buildSearchBar(
+          controller: _classroomSearchController,
+          onChanged: _filterClassrooms,
+          hint: 'Search by class name or teacher name...',
+          isSearching: _isSearchingClassrooms,
+          count: _filteredClassrooms.length,
+          label: 'classroom',
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshData,
+            color: kOrange,
+            child: _isSearchingClassrooms && _filteredClassrooms.isEmpty
+                ? _buildEmptySearchResults()
+                : SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.all(_isMobile ? 12 : 16),
+              child: GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: classroomsColumns,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: _isMobile ? 1.2 : 1.3,
+                ),
+                itemCount: _isSearchingClassrooms ? _filteredClassrooms.length : _classrooms.length,
+                itemBuilder: (context, index) {
+                  final classroom = _isSearchingClassrooms ? _filteredClassrooms[index] : _classrooms[index];
+                  final financialData = _classroomFinancialData[classroom['id']] ?? {};
+                  final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
+                  final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
+                  final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
+                  return _buildClassroomItem(
+                    color: kOrange,
+                    className: classroom['name'],
+                    students: '${classroom['studentCount'] ?? 0} students',
+                    paid: _formatCurrencySimple(totalPaid),
+                    owed: _formatCurrencySimple(totalOwed),
+                    percent: '${financialData['collectionRate']?.toStringAsFixed(0) ?? 0}%',
+                    onTap: () => _showClassroomDetails(classroom),
+                  );
+                },
               ),
             ),
           ),
         ),
-        if (_isSearchingStudents)
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
-            color: AppColors.primary.withOpacity(0.05),
-            child: Text(
-              'Found ${_filteredStudents.length} student${_filteredStudents.length != 1 ? 's' : ''}',
-              style: TextStyle(
-                fontSize: _isMobile ? 12 : 13,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
+      ],
+    );
+  }
+
+  Widget _buildStudentsScreen() {
+    if (_students.isEmpty) {
+      return _buildEmptyScreen('No students found', 'Students will appear here once added', Icons.school_rounded);
+    }
+
+    return Column(
+      children: [
+        _buildSearchBar(
+          controller: _studentSearchController,
+          onChanged: _filterStudents,
+          hint: 'Search by name, admission, class, guardian, or teacher...',
+          isSearching: _isSearchingStudents,
+          count: _filteredStudents.length,
+          label: 'student',
+        ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshData,
-            color: AppColors.primary,
+            color: kOrange,
             child: _isSearchingStudents && _filteredStudents.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.search_off, size: 48, color: AppColors.grey),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No students found',
-                    style: TextStyle(
-                      fontSize: _isMobile ? 14 : 16,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            )
+                ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
               itemCount: _isSearchingStudents ? _filteredStudents.length : _students.length,
@@ -2439,9 +2668,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(_isMobile ? 12 : 14),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -2473,7 +2709,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: _isMobile ? 14 : 16,
-                    color: AppColors.textPrimary,
+                    color: kNavy,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -2489,27 +2725,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.class_, size: _isMobile ? 12 : 14, color: AppColors.primary),
+                    Icon(Icons.class_, size: _isMobile ? 12 : 14, color: kOrange),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         student['className'],
-                        style: TextStyle(
-                          fontSize: _isMobile ? 10 : 11,
-                          color: AppColors.textSecondary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Icon(Icons.person, size: _isMobile ? 12 : 14, color: AppColors.primary),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        'Guardian: ${student['guardianName']}',
                         style: TextStyle(
                           fontSize: _isMobile ? 10 : 11,
                           color: AppColors.textSecondary,
@@ -2526,7 +2746,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _startConversationWithUser(
                   student['guardianId'],
                   'Guardian',
@@ -2536,7 +2756,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showStudentDetails(student),
               ),
             ],
@@ -2546,95 +2766,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ==================== TEACHERS SCREEN ====================
-
   Widget _buildTeachersScreen() {
     if (_teachers.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_off, size: 64, color: AppColors.grey),
-            const SizedBox(height: 16),
-            const Text('No teachers found'),
-            const SizedBox(height: 8),
-            Text(
-              'Teachers will appear here once added',
-              style: TextStyle(fontSize: _isMobile ? 12 : 13, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
-      );
+      return _buildEmptyScreen('No teachers found', 'Teachers will appear here once added', Icons.person_off);
     }
 
     return Column(
       children: [
-        Container(
-          padding: EdgeInsets.all(_isMobile ? 12 : 16),
-          color: AppColors.white,
-          child: TextField(
-            controller: _teacherSearchController,
-            onChanged: _filterTeachers,
-            decoration: InputDecoration(
-              hintText: 'Search by name, email, phone, or class...',
-              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
-              prefixIcon: Icon(Icons.search, color: AppColors.primary, size: _isMobile ? 20 : 22),
-              suffixIcon: _teacherSearchController.text.isNotEmpty
-                  ? IconButton(
-                icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
-                onPressed: () {
-                  _teacherSearchController.clear();
-                  _filterTeachers('');
-                },
-              )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              filled: true,
-              fillColor: AppColors.greyLight,
-              contentPadding: EdgeInsets.symmetric(
-                vertical: _isMobile ? 10 : 12,
-                horizontal: 16,
-              ),
-            ),
-          ),
+        _buildSearchBar(
+          controller: _teacherSearchController,
+          onChanged: _filterTeachers,
+          hint: 'Search by name, email, phone, or class...',
+          isSearching: _isSearchingTeachers,
+          count: _filteredTeachers.length,
+          label: 'teacher',
         ),
-        if (_isSearchingTeachers)
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
-            color: AppColors.primary.withOpacity(0.05),
-            child: Text(
-              'Found ${_filteredTeachers.length} teacher${_filteredTeachers.length != 1 ? 's' : ''}',
-              style: TextStyle(
-                fontSize: _isMobile ? 12 : 13,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshData,
-            color: AppColors.primary,
+            color: kOrange,
             child: _isSearchingTeachers && _filteredTeachers.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.search_off, size: 48, color: AppColors.grey),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No teachers found',
-                    style: TextStyle(
-                      fontSize: _isMobile ? 14 : 16,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            )
+                ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
               itemCount: _isSearchingTeachers ? _filteredTeachers.length : _teachers.length,
@@ -2654,9 +2806,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(_isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -2679,7 +2838,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   style: TextStyle(
                     fontSize: _isMobile ? 15 : 16,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
+                    color: kNavy,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -2694,7 +2853,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Icon(Icons.class_, size: _isMobile ? 14 : 16, color: AppColors.primary),
+                    Icon(Icons.class_, size: _isMobile ? 14 : 16, color: kOrange),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
@@ -2702,7 +2861,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         style: TextStyle(
                           fontSize: _isMobile ? 12 : 13,
                           fontWeight: FontWeight.w500,
-                          color: AppColors.textPrimary,
+                          color: kNavy,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -2716,11 +2875,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showTeacherDetails(teacher),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showTeacherDetails(teacher),
               ),
             ],
@@ -2730,95 +2889,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ==================== GUARDIANS SCREEN ====================
-
   Widget _buildGuardiansScreen() {
     if (_guardians.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.family_restroom, size: 64, color: AppColors.grey),
-            const SizedBox(height: 16),
-            const Text('No guardians found'),
-            const SizedBox(height: 8),
-            Text(
-              'Guardians will appear here once added',
-              style: TextStyle(fontSize: _isMobile ? 12 : 13, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
-      );
+      return _buildEmptyScreen('No guardians found', 'Guardians will appear here once added', Icons.family_restroom);
     }
 
     return Column(
       children: [
-        Container(
-          padding: EdgeInsets.all(_isMobile ? 12 : 16),
-          color: AppColors.white,
-          child: TextField(
-            controller: _guardianSearchController,
-            onChanged: _filterGuardians,
-            decoration: InputDecoration(
-              hintText: 'Search by name, email, phone, or address...',
-              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
-              prefixIcon: Icon(Icons.search, color: AppColors.primary, size: _isMobile ? 20 : 22),
-              suffixIcon: _guardianSearchController.text.isNotEmpty
-                  ? IconButton(
-                icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
-                onPressed: () {
-                  _guardianSearchController.clear();
-                  _filterGuardians('');
-                },
-              )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              filled: true,
-              fillColor: AppColors.greyLight,
-              contentPadding: EdgeInsets.symmetric(
-                vertical: _isMobile ? 10 : 12,
-                horizontal: 16,
-              ),
-            ),
-          ),
+        _buildSearchBar(
+          controller: _guardianSearchController,
+          onChanged: _filterGuardians,
+          hint: 'Search by name, email, phone, or address...',
+          isSearching: _isSearchingGuardians,
+          count: _filteredGuardians.length,
+          label: 'guardian',
         ),
-        if (_isSearchingGuardians)
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
-            color: AppColors.primary.withOpacity(0.05),
-            child: Text(
-              'Found ${_filteredGuardians.length} guardian${_filteredGuardians.length != 1 ? 's' : ''}',
-              style: TextStyle(
-                fontSize: _isMobile ? 12 : 13,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshData,
-            color: AppColors.primary,
+            color: kOrange,
             child: _isSearchingGuardians && _filteredGuardians.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.search_off, size: 48, color: AppColors.grey),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No guardians found',
-                    style: TextStyle(
-                      fontSize: _isMobile ? 14 : 16,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            )
+                ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
               itemCount: _isSearchingGuardians ? _filteredGuardians.length : _guardians.length,
@@ -2840,9 +2931,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(_isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -2865,7 +2963,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   style: TextStyle(
                     fontSize: _isMobile ? 15 : 16,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
+                    color: kNavy,
                   ),
                 ),
                 Text(
@@ -2890,11 +2988,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showGuardianDetails(guardian),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: AppColors.primary, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showGuardianDetails(guardian),
               ),
             ],
@@ -2904,133 +3002,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ==================== CLASSROOMS SCREEN ====================
-
-  Widget _buildClassroomsScreen() {
-    if (_classrooms.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.class_rounded, size: 64, color: AppColors.grey),
-            const SizedBox(height: 16),
-            const Text('No classrooms found'),
-            const SizedBox(height: 8),
-            Text(
-              'Classrooms will appear here once added',
-              style: TextStyle(fontSize: _isMobile ? 12 : 13, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
-      );
-    }
-
-    int classroomsColumns = _isMobile ? 1 : (_isTablet ? 2 : 3);
-
-    return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.all(_isMobile ? 12 : 16),
-          color: AppColors.white,
-          child: TextField(
-            controller: _classroomSearchController,
-            onChanged: _filterClassrooms,
-            decoration: InputDecoration(
-              hintText: 'Search by class name or teacher name...',
-              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
-              prefixIcon: Icon(Icons.search, color: AppColors.primary, size: _isMobile ? 20 : 22),
-              suffixIcon: _classroomSearchController.text.isNotEmpty
-                  ? IconButton(
-                icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
-                onPressed: () {
-                  _classroomSearchController.clear();
-                  _filterClassrooms('');
-                },
-              )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              filled: true,
-              fillColor: AppColors.greyLight,
-              contentPadding: EdgeInsets.symmetric(
-                vertical: _isMobile ? 10 : 12,
-                horizontal: 16,
-              ),
-            ),
-          ),
-        ),
-        if (_isSearchingClassrooms)
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
-            color: AppColors.primary.withOpacity(0.05),
-            child: Text(
-              'Found ${_filteredClassrooms.length} classroom${_filteredClassrooms.length != 1 ? 's' : ''}',
-              style: TextStyle(
-                fontSize: _isMobile ? 12 : 13,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _refreshData,
-            color: AppColors.primary,
-            child: _isSearchingClassrooms && _filteredClassrooms.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.search_off, size: 48, color: AppColors.grey),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No classrooms found',
-                    style: TextStyle(
-                      fontSize: _isMobile ? 14 : 16,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            )
-                : SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.all(_isMobile ? 12 : 16),
-              child: GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: classroomsColumns,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: _isMobile ? 1.2 : 1.3,
-                ),
-                itemCount: _isSearchingClassrooms ? _filteredClassrooms.length : _classrooms.length,
-                itemBuilder: (context, index) {
-                  final classroom = _isSearchingClassrooms ? _filteredClassrooms[index] : _classrooms[index];
-                  final financialData = _classroomFinancialData[classroom['id']] ?? {};
-                  final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
-                  final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
-                  final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
-                  return _buildClassroomCard(classroom, expectedRevenue, totalPaid, totalOwed);
-                },
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ==================== MESSAGES SCREEN ====================
-
   Widget _buildMessagesScreen() {
     return const MessagesScreen();
   }
-
-  // ==================== SETTINGS SCREEN ====================
 
   Widget _buildSettingsScreen() {
     return SingleChildScrollView(
@@ -3043,14 +3017,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
             style: TextStyle(
               fontSize: _isMobile ? 22 : 26,
               fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+              color: kNavy,
             ),
           ),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(16),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Column(
               children: [
@@ -3071,8 +3053,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Column(
       children: [
         ListTile(
-          leading: Icon(icon, color: isDestructive ? AppColors.error : AppColors.primary),
-          title: Text(title, style: TextStyle(color: isDestructive ? AppColors.error : AppColors.textPrimary)),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: (isDestructive ? AppColors.error : kOrange).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: (isDestructive ? AppColors.error : kOrange).withOpacity(0.2),
+              ),
+            ),
+            child: Icon(icon, color: isDestructive ? AppColors.error : kOrange, size: 20),
+          ),
+          title: Text(title, style: TextStyle(color: isDestructive ? AppColors.error : kNavy)),
           subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
           onTap: onTap ?? _showComingSoon,
@@ -3082,23 +3074,131 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildScreenForIndex(int index) {
-    switch (index) {
-      case 1:
-        return _buildClassroomsScreen();
-      case 2:
-        return _buildStudentsScreen();
-      case 3:
-        return _buildTeachersScreen();
-      case 4:
-        return _buildGuardiansScreen();
-      case 5:
-        return _buildMessagesScreen();
-      case 6:
-        return _buildSettingsScreen();
-      default:
-        return _buildHomeScreen();
-    }
+  // ==================== COMMON WIDGETS ====================
+
+  Widget _buildSearchBar({
+    required TextEditingController controller,
+    required Function(String) onChanged,
+    required String hint,
+    required bool isSearching,
+    required int count,
+    required String label,
+  }) {
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(_isMobile ? 12 : 16),
+          color: Colors.white,
+          child: TextField(
+            controller: controller,
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
+              prefixIcon: Icon(Icons.search, color: kOrange, size: _isMobile ? 20 : 22),
+              suffixIcon: controller.text.isNotEmpty
+                  ? IconButton(
+                icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+              )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: kOrange.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: kOrange.withOpacity(0.2)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: kOrange, width: 2),
+              ),
+              filled: true,
+              fillColor: kLightOrange,
+              contentPadding: EdgeInsets.symmetric(
+                vertical: _isMobile ? 10 : 12,
+                horizontal: 16,
+              ),
+            ),
+          ),
+        ),
+        if (isSearching)
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
+            color: kOrange.withOpacity(0.05),
+            child: Text(
+              'Found $count $label${count != 1 ? 's' : ''}',
+              style: TextStyle(
+                fontSize: _isMobile ? 12 : 13,
+                color: kOrange,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyScreen(String title, String subtitle, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: kOrange.withOpacity(0.05),
+              shape: BoxShape.circle,
+              border: Border.all(color: kOrange.withOpacity(0.2)),
+            ),
+            child: Icon(icon, size: 64, color: kOrange.withOpacity(0.3)),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: _isMobile ? 16 : 20,
+              fontWeight: FontWeight.bold,
+              color: kNavy,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: _isMobile ? 12 : 13,
+              color: AppColors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptySearchResults() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off, size: 48, color: kOrange.withOpacity(0.3)),
+          const SizedBox(height: 12),
+          Text(
+            'No results found',
+            style: TextStyle(
+              fontSize: _isMobile ? 14 : 16,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showComingSoon() {
@@ -3111,10 +3211,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Logout', style: TextStyle(color: AppColors.error)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: kOrange.withOpacity(0.3)),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.logout, color: AppColors.error),
+            const SizedBox(width: 8),
+            const Text('Logout', style: TextStyle(color: AppColors.error)),
+          ],
+        ),
         content: const Text('Are you sure you want to logout?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -3126,11 +3239,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             child: const Text('Logout'),
           ),
         ],
       ),
     );
   }
+}
+
+// ─── Data Models ──────────────────────────────────────────────────────────────
+
+class _NavItem {
+  final IconData icon;
+  final String label;
+  final int index;
+  final bool? isMessages;
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.index,
+    this.isMessages,
+  });
 }

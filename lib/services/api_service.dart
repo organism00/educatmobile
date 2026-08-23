@@ -520,6 +520,7 @@ class ApiService {
 
 // CLOCK IN - Complete working version
   Future<Map<String, dynamic>> clockIn({
+    required String token,
     required String teacherId,
     required String schoolId,
     required String qrCodeValue,
@@ -531,6 +532,14 @@ class ApiService {
     required String userAgent,
   }) async {
     try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
       final url = Uri.parse('$baseUrl/TeacherAttendance/ClockIn?teacherId=$teacherId');
       print('📤 Clock In Request');
       print('URL: $url');
@@ -550,6 +559,7 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
           'schoolId': schoolId,
@@ -575,11 +585,12 @@ class ApiService {
       }
 
       final responseData = jsonDecode(response.body);
-
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
       // Check if response indicates success
-      if (response.statusCode == 200 || response.statusCode == 201) {
+      if (httpStatus == 200 || httpStatus == 201) {
         // Check if there's a status field in the response
-        if (responseData['status'] == true || responseData['status'] == 'true') {
+        if (isSuccess) {
           return {
             'success': true,
             'data': responseData['data'],
@@ -597,7 +608,7 @@ class ApiService {
         // Non-200 status code
         return {
           'success': false,
-          'message': responseData['responseMessage'] ?? 'Failed to clock in (Status ${response.statusCode})',
+          'message': responseData['responseMessage'] ?? 'Failed to clock in (Status $httpStatus)',
           'data': responseData['data'],
         };
       }
@@ -612,10 +623,20 @@ class ApiService {
 
 // CLOCK OUT - Updated to match the same pattern
   Future<Map<String, dynamic>> clockOut({
+    required String token,  // Add this parameter
     required String schoolId,
     required String teacherId,
   }) async {
     try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
       final url = Uri.parse('$baseUrl/TeacherAttendance/ClockOut?schoolId=$schoolId&teacherId=$teacherId');
       print('📤 Clock Out Request');
       print('URL: $url');
@@ -625,6 +646,7 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'Authorization': 'Bearer $token',  // Add this
         },
       ).timeout(timeout);
 
@@ -640,9 +662,11 @@ class ApiService {
       }
 
       final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        if (responseData['status'] == true || responseData['status'] == 'true') {
+      if (httpStatus == 200 || httpStatus == 201) {
+        if (isSuccess) {
           return {
             'success': true,
             'data': responseData['data'],
@@ -658,7 +682,7 @@ class ApiService {
       } else {
         return {
           'success': false,
-          'message': responseData['responseMessage'] ?? 'Failed to clock out (Status ${response.statusCode})',
+          'message': responseData['responseMessage'] ?? 'Failed to clock out (Status $httpStatus)',
         };
       }
     } catch (e) {
@@ -671,71 +695,7 @@ class ApiService {
   }
 
 // GET TEACHER ATTENDANCE STATUS
-  Future<Map<String, dynamic>> getTeacherAttendanceStatus({
-    required String teacherId,
-  }) async {
-    try {
-      final url = Uri.parse('$baseUrl/TeacherAttendance/Status?teacherId=$teacherId');
-      print('📤 Get Attendance Status');
-      print('URL: $url');
 
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-      ).timeout(timeout);
-
-      print('📥 Attendance Status Response');
-      print('Status Code: ${response.statusCode}');
-      print('Body: ${response.body}');
-
-      if (response.body.isEmpty) {
-        return {
-          'success': false,
-          'message': 'Empty response from server',
-          'isClockedIn': false,
-        };
-      }
-
-      final responseData = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        if (responseData['status'] == true || responseData['status'] == 'true') {
-          // Extract attendance status from data
-          final data = responseData['data'];
-          final isClockedIn = data?['isClockedIn'] ?? data?['isClockedIn'] ?? false;
-
-          return {
-            'success': true,
-            'data': data,
-            'isClockedIn': isClockedIn,
-            'message': responseData['responseMessage'] ?? 'Attendance status retrieved',
-          };
-        } else {
-          return {
-            'success': false,
-            'message': responseData['responseMessage'] ?? 'Failed to get attendance status',
-            'isClockedIn': false,
-          };
-        }
-      } else {
-        return {
-          'success': false,
-          'message': responseData['responseMessage'] ?? 'Failed to get attendance status (Status ${response.statusCode})',
-          'isClockedIn': false,
-        };
-      }
-    } catch (e) {
-      print('❌ Get Attendance Status Error: $e');
-      return {
-        'success': false,
-        'message': 'Error: ${e.toString()}',
-        'isClockedIn': false,
-      };
-    }
-  }
 
 // GET TEACHER ATTENDANCE STATUS - Updated to use http instead of Dio
 
@@ -989,6 +949,89 @@ class ApiService {
       };
     }
   }
+
+  // In your api_service.dart
+
+// ==================== TEACHER ATTENDANCE ENDPOINTS ====================
+
+  /// Get teacher attendance status for today
+  Future<Map<String, dynamic>> getTeacherAttendanceStatus({
+    required String token,
+    required String teacherId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse('$baseUrl/TeacherAttendance/Status?teacherId=$teacherId');
+      print('📤 Get Attendance Status');
+      print('URL: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Attendance Status Response');
+      print('Status Code: ${response.statusCode}');
+      print('Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'isClockedIn': false,
+          'data': null,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final data = responseData['data'];
+        final bool isClockedIn = data?['isClockedIn'] ??
+            (data?['clockInTime'] != null && data?['clockOutTime'] == null) ??
+            false;
+
+        return {
+          'success': true,
+          'data': data,
+          'isClockedIn': isClockedIn,
+          'message': responseData['responseMessage'] ?? 'Attendance status retrieved',
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to get attendance status',
+          'isClockedIn': false,
+          'data': null,
+        };
+      }
+    } catch (e) {
+      print('❌ Get Attendance Status Error: $e');
+      return {
+        'success': false,
+        'message': 'Error: ${e.toString()}',
+        'isClockedIn': false,
+        'data': null,
+      };
+    }
+  }
+
+
+
 
 // Save Teacher Attendance - Updated with correct endpoint
   Future<Map<String, dynamic>> saveTeacherAttendance({
