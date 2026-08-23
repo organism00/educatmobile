@@ -16,36 +16,52 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-// ==================== RESPONSIVE DATA CLASS ====================
+// ==================== CONSTANTS ====================
+
+const kPrimary = Color(0xFFFF6B35);
+const kPrimaryLight = Color(0xFFFF8A5C);
+const kPrimaryDark = Color(0xFFE85A2A);
+const kSecondary = Color(0xFF1A2340);
+const kBackground = Color(0xFFF8F9FA);
+const kCardBg = Colors.white;
+const kSuccess = Color(0xFF2ECC71);
+const kWarning = Color(0xFFF39C12);
+const kDanger = Color(0xFFE74C3C);
+const kInfo = Color(0xFF3498DB);
+const kPurple = Color(0xFF9B59B6);
+const kTextPrimary = Color(0xFF2C3E50);
+const kTextSecondary = Color(0xFF7F8C8D);
+const kBorder = Color(0xFFECF0F1);
+const kShadow = Color(0x1A000000);
+
+// ==================== RESPONSIVE DATA ====================
 
 class ResponsiveData {
-  final bool isMobile;
-  final bool isTablet;
-  final bool isDesktop;
-  final double padding;
-  final int gridCrossAxisCount;
-  final int quickActionsCount;
-  final double fontSizeSmall;
-  final double fontSizeMedium;
-  final double fontSizeLarge;
-  final double fontSizeHeader;
-  final double slideshowHeight;
-  final double cardElevation;
+  final BuildContext context;
 
-  ResponsiveData({
-    required this.isMobile,
-    required this.isTablet,
-    required this.isDesktop,
-    required this.padding,
-    required this.gridCrossAxisCount,
-    required this.quickActionsCount,
-    required this.fontSizeSmall,
-    required this.fontSizeMedium,
-    required this.fontSizeLarge,
-    required this.fontSizeHeader,
-    required this.slideshowHeight,
-    required this.cardElevation,
-  });
+  ResponsiveData(this.context);
+
+  double get screenWidth => MediaQuery.of(context).size.width;
+
+  bool get isMobile => screenWidth < 600;
+  bool get isTablet => screenWidth >= 600 && screenWidth < 1200;
+  bool get isDesktop => screenWidth >= 1200;
+
+  double get padding => isMobile ? 16 : (isTablet ? 24 : 32);
+  double get spacing => isMobile ? 12 : (isTablet ? 16 : 20);
+  double get radius => isMobile ? 12 : (isTablet ? 16 : 20);
+
+  double get fontSizeH1 => isMobile ? 24 : (isTablet ? 28 : 32);
+  double get fontSizeH2 => isMobile ? 20 : (isTablet ? 24 : 28);
+  double get fontSizeH3 => isMobile ? 16 : (isTablet ? 18 : 20);
+  double get fontSizeBody => isMobile ? 14 : (isTablet ? 15 : 16);
+  double get fontSizeMedium => isMobile ? 16 : (isTablet ? 18 : 20);
+  double get fontSizeSmall => isMobile ? 12 : (isTablet ? 13 : 14);
+  double get fontSizeCaption => isMobile ? 10 : (isTablet ? 11 : 12);
+
+  int get gridColumns => isMobile ? 2 : (isTablet ? 3 : 4);
+  int get quickActionsCount => isMobile ? 4 : (isTablet ? 6 : 8);
+  double get slideshowHeight => isMobile ? 150.0 : (isTablet ? 180.0 : 200.0);
 }
 
 // ==================== CLOCK IN/OUT WIDGET ====================
@@ -75,29 +91,17 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
   bool _isLoadingStatus = true;
   String? _scannedQrCode;
 
-  // Location values - should be obtained from GPS in production
   double _latitude = 6.636814;
   double _longitude = 3.514077;
 
   @override
   void initState() {
     super.initState();
-    _getLocation();
     _loadAttendanceStatus();
   }
 
-  Future<void> _getLocation() async {
-    // In production, use geolocator package to get actual location
-    setState(() {
-      _latitude = 6.636814;
-      _longitude = 3.514077;
-    });
-  }
-
   Future<void> _loadAttendanceStatus() async {
-    setState(() {
-      _isLoadingStatus = true;
-    });
+    setState(() => _isLoadingStatus = true);
 
     final prefs = await SharedPreferences.getInstance();
     final today = DateTime.now();
@@ -112,83 +116,71 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final token = authProvider.token;
-
-      if (token == null) {
-        print('❌ No token available');
-        setState(() {
-          _isLoadingStatus = false;
-        });
-        return;
-      }
-
-      final result = await widget.apiService.getTeacherAttendanceStatus(
-        token: token,
-        teacherId: widget.user.id,
-      );
-
-      if (result['success'] && mounted) {
-        final data = result['data'];
-        if (data != null) {
-          setState(() {
-            if (data['clockInTime'] != null) {
-              _clockInTime = data['clockInTime'];
-              prefs.setString(clockInKey, _clockInTime!);
-            }
-            if (data['clockOutTime'] != null) {
-              _clockOutTime = data['clockOutTime'];
-              prefs.setString(clockOutKey, _clockOutTime!);
-            }
-            _isClockedIn = _clockInTime != null && _clockOutTime == null;
-          });
+      if (token != null) {
+        final result = await widget.apiService.getTeacherAttendanceStatus(
+          token: token,
+          teacherId: widget.user.id,
+        );
+        if (result['success'] && mounted) {
+          final data = result['data'];
+          if (data != null) {
+            setState(() {
+              if (data['clockInTime'] != null) {
+                _clockInTime = data['clockInTime'];
+                prefs.setString(clockInKey, _clockInTime!);
+              }
+              if (data['clockOutTime'] != null) {
+                _clockOutTime = data['clockOutTime'];
+                prefs.setString(clockOutKey, _clockOutTime!);
+              }
+              _isClockedIn = _clockInTime != null && _clockOutTime == null;
+            });
+          }
         }
       }
     } catch (e) {
       print('Error loading attendance status: $e');
     }
 
-    setState(() {
-      _isLoadingStatus = false;
-    });
+    setState(() => _isLoadingStatus = false);
   }
 
   void _showQrScanner() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.8,
-        padding: const EdgeInsets.all(16),
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         child: Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Scan QR Code',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Position the QR code from the admin dashboard inside the frame',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.textSecondary,
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: kBorder)),
               ),
-              textAlign: TextAlign.center,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Scan QR Code',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: kSecondary,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: kSecondary),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
             Expanded(
               child: MobileScanner(
                 onDetect: (detectEvent) {
@@ -196,9 +188,6 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                   if (barcodes.isNotEmpty) {
                     final qrCodeValue = barcodes.first.rawValue;
                     if (qrCodeValue != null && qrCodeValue.isNotEmpty) {
-                      setState(() {
-                        _scannedQrCode = qrCodeValue;
-                      });
                       Navigator.pop(context);
                       _clockInWithQrCode(qrCodeValue);
                     }
@@ -209,35 +198,28 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: AppColors.error,
-                        ),
+                        Icon(Icons.error_outline, size: 64, color: kDanger),
                         const SizedBox(height: 16),
                         const Text(
                           'Camera Error',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
+                            color: kSecondary,
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'Please grant camera permission to scan QR codes',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: AppColors.textSecondary,
-                          ),
+                          style: TextStyle(color: kTextSecondary),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
                         ElevatedButton(
-                          onPressed: () {
-                            // Retry camera
-                          },
+                          onPressed: () {},
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
+                            backgroundColor: kPrimary,
+                            foregroundColor: Colors.white,
                           ),
                           child: const Text('Retry'),
                         ),
@@ -247,20 +229,28 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                 },
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: kBorder)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
                   ),
-                ),
-                TextButton(
-                  onPressed: _showManualQrEntry,
-                  child: const Text('Enter Manually'),
-                ),
-              ],
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showManualQrEntry();
+                    },
+                    child: const Text('Enter Manually'),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -269,17 +259,20 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
   }
 
   void _showManualQrEntry() {
-    Navigator.pop(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Enter QR Code'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Enter QR Code',
+          style: TextStyle(color: kSecondary),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
               'Paste or type the QR code value from the admin dashboard',
-              style: TextStyle(fontSize: 13),
+              style: TextStyle(color: kTextSecondary, fontSize: 13),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -289,10 +282,17 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                   _clockInWithQrCode(value);
                 }
               },
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Paste QR Code here',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: kBorder),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: kPrimary),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
           ],
@@ -303,11 +303,10 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
-              // We'll handle this differently
-            },
+            onPressed: () {},
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: kPrimary,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Clock In'),
           ),
@@ -328,32 +327,24 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
 
       if (token == null) {
         _showError('Not authenticated. Please login again.');
-        setState(() { _isLoading = false; });
+        setState(() => _isLoading = false);
         return;
       }
 
-      // Validate QR Code format
       final qrParts = qrCodeValue.split('|');
-      if (qrParts.length != 4) {
+      if (qrParts.length != 4 || qrParts[0] != 'SCHOOL_ATTENDANCE') {
         _showError('Invalid QR Code format. Please scan a valid attendance QR code.');
-        setState(() { _isLoading = false; });
-        return;
-      }
-
-      if (qrParts[0] != 'SCHOOL_ATTENDANCE') {
-        _showError('This is not an attendance QR code.');
-        setState(() { _isLoading = false; });
+        setState(() => _isLoading = false);
         return;
       }
 
       final qrSchoolId = qrParts[1];
       if (qrSchoolId != widget.user.schoolId) {
         _showError('This QR code is for a different school.');
-        setState(() { _isLoading = false; });
+        setState(() => _isLoading = false);
         return;
       }
 
-      // Get device info
       final deviceInfo = await _getDeviceInfo();
       final ipAddress = await _getIpAddress();
 
@@ -389,17 +380,10 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
         _clockOutTime = null;
         _scannedQrCode = qrCodeValue;
 
-        setState(() {
-          _statusMessage = '✅ Clock in successful!';
-        });
-
+        setState(() => _statusMessage = '✅ Clock in successful!');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Clock in successful!'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('✅ Clock in successful!'), backgroundColor: kSuccess),
         );
-
         widget.onStatusChanged();
       } else {
         _showError(result['message'] ?? 'Clock in failed. Please try again.');
@@ -408,24 +392,8 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
       print('Clock in error: $e');
       _showError('Error: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  void _showError(String message) {
-    setState(() {
-      _statusMessage = '❌ $message';
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
 
   Future<void> _clockOut() async {
@@ -440,7 +408,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
 
       if (token == null) {
         _showError('Not authenticated. Please login again.');
-        setState(() { _isLoading = false; });
+        setState(() => _isLoading = false);
         return;
       }
 
@@ -468,17 +436,10 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
         _isClockedIn = false;
         _scannedQrCode = null;
 
-        setState(() {
-          _statusMessage = '✅ Clock out successful!';
-        });
-
+        setState(() => _statusMessage = '✅ Clock out successful!');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Clock out successful!'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('✅ Clock out successful!'), backgroundColor: kSuccess),
         );
-
         widget.onStatusChanged();
       } else {
         _showError(result['message'] ?? 'Clock out failed. Please try again.');
@@ -487,12 +448,15 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
       print('Clock out error: $e');
       _showError('Error: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showError(String message) {
+    setState(() => _statusMessage = '❌ $message');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: kDanger),
+    );
   }
 
   Future<Map<String, String>> _getDeviceInfo() async {
@@ -516,11 +480,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
     } catch (e) {
       print('Error getting device info: $e');
     }
-    return {
-      'model': 'Unknown',
-      'manufacturer': 'Unknown',
-      'version': '1.0',
-    };
+    return {'model': 'Unknown', 'manufacturer': 'Unknown', 'version': '1.0'};
   }
 
   Future<String> _getIpAddress() async {
@@ -534,17 +494,32 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
     }
   }
 
+  String _formatTime(String timestamp) {
+    try {
+      final time = DateTime.parse(timestamp);
+      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return timestamp;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final resp = ResponsiveData(context);
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(resp.padding),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradient,
-        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [kPrimary, kPrimaryDark],
+        ),
+        borderRadius: BorderRadius.circular(resp.radius + 4),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 10,
+            color: kPrimary.withOpacity(0.3),
+            blurRadius: 20,
             offset: const Offset(0, 4),
           ),
         ],
@@ -554,94 +529,58 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
         children: [
           Row(
             children: [
-              Icon(
-                _isClockedIn ? Icons.work_rounded : Icons.work_outline_rounded,
-                color: Colors.white,
-                size: 24,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                _isClockedIn ? 'Currently Clocked In' : 'Not Clocked In',
-                style: const TextStyle(
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _isClockedIn ? Icons.work_rounded : Icons.work_outline_rounded,
                   color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+                  size: 24,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isClockedIn ? 'Currently Clocked In' : 'Not Clocked In',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (_clockInTime != null)
+                      Text(
+                        'In: ${_formatTime(_clockInTime!)}',
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                  ],
+                ),
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: _isClockedIn
-                      ? AppColors.success.withOpacity(0.2)
-                      : AppColors.grey.withOpacity(0.2),
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.white.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   _isClockedIn ? 'ACTIVE' : 'OFF',
                   style: TextStyle(
-                    color: _isClockedIn ? AppColors.success : Colors.white70,
-                    fontSize: 12,
+                    color: Colors.white,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              if (_clockInTime != null) ...[
-                Icon(Icons.login, color: Colors.white70, size: 16),
-                const SizedBox(width: 4),
-                Text(
-                  'In: ${_formatTime(_clockInTime!)}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-              if (_clockInTime != null && _clockOutTime != null) ...[
-                const SizedBox(width: 16),
-                Icon(Icons.logout, color: Colors.white70, size: 16),
-                const SizedBox(width: 4),
-                Text(
-                  'Out: ${_formatTime(_clockOutTime!)}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-              if (_clockInTime == null) ...[
-                const Text(
-                  'Not clocked in today',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ],
-          ),
-          if (_scannedQrCode != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.qr_code, color: Colors.white70, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'QR Code scanned',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
           if (_isLoadingStatus)
             const Center(
@@ -662,22 +601,15 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: _isLoading || _isClockedIn ? null : _showQrScanner,
-                        icon: Icon(Icons.qr_code_scanner, size: 20),
-                        label: const Text(
-                          'Scan QR',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
+                        icon: const Icon(Icons.qr_code_scanner, size: 20),
+                        label: const Text('Scan QR'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: AppColors.primary,
+                          foregroundColor: kPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 0,
                         ),
                       ),
                     ),
@@ -685,7 +617,6 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                     Expanded(
                       child: ElevatedButton(
                         onPressed: _isLoading || _isClockedIn ? null : () {
-                          // Use the scanned QR code if available, or prompt to scan
                           if (_scannedQrCode != null) {
                             _clockInWithQrCode(_scannedQrCode!);
                           } else {
@@ -694,12 +625,11 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: AppColors.primary,
+                          foregroundColor: kPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 0,
                         ),
                         child: _isLoading && !_isClockedIn
                             ? const SizedBox(
@@ -707,7 +637,7 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                           width: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: AppColors.primary,
+                            color: kPrimary,
                           ),
                         )
                             : Row(
@@ -738,15 +668,12 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                       child: ElevatedButton(
                         onPressed: _isLoading || !_isClockedIn ? null : _clockOut,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _isClockedIn
-                              ? AppColors.error
-                              : AppColors.grey,
+                          backgroundColor: _isClockedIn ? kDanger : Colors.white.withOpacity(0.3),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 0,
                         ),
                         child: _isLoading && _isClockedIn
                             ? const SizedBox(
@@ -788,11 +715,31 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
                     ),
                     child: Text(
                       _statusMessage!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
                       textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+                if (_scannedQrCode != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.qr_code, color: Colors.white70, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'QR Code scanned',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -801,15 +748,6 @@ class _ClockInOutWidgetState extends State<ClockInOutWidget> {
         ],
       ),
     );
-  }
-
-  String _formatTime(String timestamp) {
-    try {
-      final time = DateTime.parse(timestamp);
-      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return timestamp;
-    }
   }
 }
 
@@ -829,7 +767,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   late ApiService _apiService;
   late LocalStorageService _localStorage;
 
-  // Data states
   List<Map<String, dynamic>> _students = [];
   List<Map<String, dynamic>> _filteredStudents = [];
   List<Map<String, dynamic>> _classrooms = [];
@@ -839,40 +776,32 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   bool _isRefreshing = false;
   String? _errorMessage;
 
-  // Search
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
 
-  // Attendance data
   Map<String, Map<String, bool>> _attendanceRecords = {};
   DateTime _attendanceDate = DateTime.now();
   bool _isSavingAttendance = false;
   Set<String> _savedAttendanceDates = {};
 
-  // Results data - Using local storage
   List<Map<String, dynamic>> _subjects = [];
   Map<String, Map<String, Map<String, dynamic>>> _studentScores = {};
   bool _isSavingResults = false;
   bool _isLoadingSubjects = false;
 
-  // News data
   List<Map<String, dynamic>> _news = [];
   bool _isLoadingNews = false;
 
-  // Add Subject
   bool _isAddingSubject = false;
   final TextEditingController _subjectNameController = TextEditingController();
   final TextEditingController _subjectDescriptionController = TextEditingController();
 
-  // Assignment data
   List<Map<String, dynamic>> _assignments = [];
   bool _isLoadingAssignments = false;
   String? _selectedAssignmentClassId;
 
-  // Messages - Unread count
   int _unreadMessageCount = 0;
 
-  // Activity Slideshow
   final List<Map<String, dynamic>> _activitySlides = [
     {'title': '📝 Mark Attendance', 'description': 'Mark student attendance', 'icon': Icons.checklist, 'action': 'Take Attendance'},
     {'title': '📊 Record Results', 'description': 'Upload assessment scores', 'icon': Icons.grade, 'action': 'Record Results'},
@@ -940,28 +869,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     });
   }
 
-  ResponsiveData _getResponsiveData(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isMobile = width < 600;
-    final isTablet = width >= 600 && width < 1200;
-    final isDesktop = width >= 1200;
-
-    return ResponsiveData(
-      isMobile: isMobile,
-      isTablet: isTablet,
-      isDesktop: isDesktop,
-      padding: isMobile ? 12.0 : (isTablet ? 20.0 : 24.0),
-      gridCrossAxisCount: isMobile ? 2 : (isTablet ? 3 : 4),
-      quickActionsCount: isMobile ? 4 : (isTablet ? 6 : 8),
-      fontSizeSmall: isMobile ? 10.0 : (isTablet ? 12.0 : 13.0),
-      fontSizeMedium: isMobile ? 14.0 : (isTablet ? 16.0 : 18.0),
-      fontSizeLarge: isMobile ? 20.0 : (isTablet ? 24.0 : 28.0),
-      fontSizeHeader: isMobile ? 22.0 : (isTablet ? 28.0 : 32.0),
-      slideshowHeight: isMobile ? 150.0 : (isTablet ? 180.0 : 200.0),
-      cardElevation: isMobile ? 2 : (isTablet ? 3 : 4),
-    );
-  }
-
   Future<void> _loadLocalStorage() async {
     final prefs = await SharedPreferences.getInstance();
     _localStorage = LocalStorageService(prefs);
@@ -985,9 +892,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     if (result['success'] && mounted) {
       final messages = result['data'] as List? ?? [];
       final unreadCount = messages.where((m) => m['isRead'] == false).length;
-      setState(() {
-        _unreadMessageCount = unreadCount;
-      });
+      setState(() => _unreadMessageCount = unreadCount);
     }
   }
 
@@ -1021,8 +926,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         _selectedClassroomId = _classrooms[0]['id'];
         _selectedClassName = _classrooms[0]['name'];
         _selectedAssignmentClassId = _selectedClassroomId;
+
         await _fetchStudents(token, _selectedClassroomId);
-        await _loadSubjectsFromLocal();
+        await _fetchSubjectsFromApi(token, _selectedClassroomId);
         await _fetchAssignments(token);
       } else {
         setState(() { _errorMessage = 'No classroom assigned'; _isLoading = false; });
@@ -1119,6 +1025,84 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
   }
 
+  Future<void> _fetchSubjectsFromApi(String token, String classroomId) async {
+    setState(() { _isLoadingSubjects = true; });
+
+    try {
+      final result = await _apiService.getSubjectsByClass(
+        token: token,
+        schoolId: _currentUser.schoolId,
+        classroomId: classroomId,
+      );
+
+      if (result['success'] && mounted) {
+        final subjects = result['subjects'] as List<Map<String, dynamic>>? ?? [];
+
+        await _localStorage.saveSubjects(classroomId, subjects);
+
+        setState(() {
+          _subjects = subjects;
+          _isLoadingSubjects = false;
+        });
+
+        _initializeStudentScores();
+
+        print('✅ Loaded ${_subjects.length} subjects from API');
+      } else {
+        await _loadSubjectsFromLocal();
+        print('⚠️ Using local subjects data');
+      }
+    } catch (e) {
+      print('❌ Error fetching subjects: $e');
+      await _loadSubjectsFromLocal();
+    } finally {
+      if (mounted) {
+        setState(() { _isLoadingSubjects = false; });
+      }
+    }
+  }
+
+  Future<void> _loadSubjectsFromLocal() async {
+    final subjects = await _localStorage.getSubjects(_selectedClassroomId);
+    setState(() {
+      _subjects = subjects;
+      _initializeStudentScores();
+    });
+    print('📚 Loaded ${_subjects.length} subjects from local storage');
+  }
+
+  Future<void> _refreshSubjects() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    if (token == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: kPrimary),
+      ),
+    );
+
+    try {
+      await _fetchSubjectsFromApi(token, _selectedClassroomId);
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Subjects refreshed successfully!'),
+          backgroundColor: kSuccess,
+        ),
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error refreshing subjects: $e'),
+          backgroundColor: kDanger,
+        ),
+      );
+    }
+  }
+
   Future<void> _fetchAssignments(String token) async {
     if (_selectedClassroomId.isEmpty) return;
     setState(() { _isLoadingAssignments = true; });
@@ -1146,14 +1130,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       _assignments = [];
     }
     setState(() { _isLoadingAssignments = false; });
-  }
-
-  Future<void> _loadSubjectsFromLocal() async {
-    setState(() { _isLoadingSubjects = true; });
-    final subjects = await _localStorage.getSubjects(_selectedClassroomId);
-    _subjects = subjects;
-    setState(() { _isLoadingSubjects = false; });
-    _initializeStudentScores();
   }
 
   void _filterStudents(String query) {
@@ -1206,6 +1182,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final token = Provider.of<AuthProvider>(context, listen: false).token;
     if (token != null) {
       await _fetchStudents(token, _selectedClassroomId);
+      await _fetchSubjectsFromApi(token, _selectedClassroomId);
       await _fetchAssignments(token);
     }
     await _fetchNews();
@@ -1213,7 +1190,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     setState(() { _isRefreshing = false; });
   }
 
-  // Navigation methods
   void _navigateToMessages() {
     Navigator.push(
       context,
@@ -1233,7 +1209,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final parentName = student['parentName']?.toString() ?? 'Parent';
     if (parentId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Parent ID not found'), backgroundColor: AppColors.error),
+        const SnackBar(content: Text('Parent ID not found'), backgroundColor: kDanger),
       );
       return;
     }
@@ -1251,134 +1227,128 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     ).then((_) => _fetchUnreadMessages());
   }
 
-  // Assignment methods
   void _showCreateAssignmentDialog() {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
     DateTime? dueDate;
     String? selectedClassId = _selectedClassroomId;
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
           return AlertDialog(
-            title: const Text('Create Assignment', style: TextStyle(color: AppColors.primary)),
-            content: SingleChildScrollView(
-              child: Container(
-                width: responsive.isMobile ? null : 500,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_classrooms.length > 1)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: DropdownButtonFormField<String>(
-                          value: selectedClassId,
-                          decoration: const InputDecoration(
-                            labelText: 'Select Class',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: _classrooms.map((classroom) {
-                            return DropdownMenuItem<String>(
-                              value: classroom['id'],
-                              child: Text(classroom['name']),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              selectedClassId = value;
-                            });
-                          },
-                        ),
-                      ),
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Assignment Title *',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: descriptionController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Description *',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    InkWell(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now().add(const Duration(days: 7)),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            dueDate = picked;
-                          });
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: AppColors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.calendar_today, color: AppColors.primary),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Due Date *'),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    dueDate != null
-                                        ? '${dueDate!.day}/${dueDate!.month}/${dueDate!.year}'
-                                        : 'Select a date',
-                                    style: TextStyle(
-                                      fontWeight: dueDate != null ? FontWeight.bold : FontWeight.normal,
-                                      color: dueDate != null ? AppColors.textPrimary : AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Create Assignment', style: TextStyle(color: kPrimary)),
+            content: SizedBox(
+              width: resp.isMobile ? null : 500,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_classrooms.length > 1)
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      child: DropdownButtonFormField<String>(
+                        value: selectedClassId,
+                        decoration: const InputDecoration(
+                          labelText: 'Select Class',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _classrooms.map((classroom) {
+                          return DropdownMenuItem<String>(
+                            value: classroom['id'],
+                            child: Text(classroom['name']),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => selectedClassId = value);
+                        },
+                      ),
+                    ),
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Assignment Title *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: descriptionController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Description *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now().add(const Duration(days: 7)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setState(() => dueDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: kBorder),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.info_outline, color: AppColors.primary, size: 20),
+                          Icon(Icons.calendar_today, color: kPrimary),
                           const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Assignment will be visible to all students in the selected class',
-                              style: TextStyle(fontSize: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Due Date *', style: TextStyle(fontSize: 12)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  dueDate != null
+                                      ? '${dueDate!.day}/${dueDate!.month}/${dueDate!.year}'
+                                      : 'Select a date',
+                                  style: TextStyle(
+                                    fontWeight: dueDate != null ? FontWeight.bold : FontWeight.normal,
+                                    color: dueDate != null ? kTextPrimary : kTextSecondary,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
+                          Icon(Icons.arrow_drop_down, color: kPrimary),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: kPrimary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: kPrimary, size: 20),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Assignment will be visible to all students in the selected class',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -1392,7 +1362,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                   final description = descriptionController.text.trim();
                   if (title.isEmpty || description.isEmpty || dueDate == null || selectedClassId == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please fill all fields'), backgroundColor: AppColors.warning),
+                      const SnackBar(content: Text('Please fill all fields'), backgroundColor: kWarning),
                     );
                     return;
                   }
@@ -1404,7 +1374,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                     dueDate: dueDate!,
                   );
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimary,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text('Create Assignment'),
               ),
             ],
@@ -1427,7 +1400,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
+        child: CircularProgressIndicator(color: kPrimary),
       ),
     );
 
@@ -1447,152 +1420,122 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       if (result['success']) {
         await _fetchAssignmentsForClass(token, classroomId);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message']), backgroundColor: AppColors.success),
+          SnackBar(content: Text(result['message']), backgroundColor: kSuccess),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message']), backgroundColor: AppColors.error),
+          SnackBar(content: Text(result['message']), backgroundColor: kDanger),
         );
       }
     } catch (e) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+        SnackBar(content: Text('Error: $e'), backgroundColor: kDanger),
       );
     }
   }
 
   void _showViewAssignmentsScreen() {
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: responsive.isMobile ? 0.9 : 0.7,
-        minChildSize: 0.5,
-        maxChildSize: responsive.isMobile ? 0.95 : 0.85,
-        expand: false,
-        builder: (context, scrollController) {
-          return StatefulBuilder(
-            builder: (context, bottomSheetSetState) {
-              return Container(
-                padding: EdgeInsets.all(responsive.padding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Assignments',
-                          style: TextStyle(
-                            fontSize: responsive.fontSizeLarge,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.close, size: responsive.fontSizeMedium),
-                        ),
-                      ],
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(resp.padding),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: kBorder)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Assignments',
+                    style: TextStyle(
+                      fontSize: resp.fontSizeH2,
+                      fontWeight: FontWeight.bold,
+                      color: kSecondary,
                     ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: kSecondary),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _isLoadingAssignments
+                  ? const Center(child: CircularProgressIndicator(color: kPrimary))
+                  : _assignments.isEmpty
+                  ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.assignment_turned_in, size: 64, color: kBorder),
                     const SizedBox(height: 16),
-                    if (_classrooms.length > 1)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: AppColors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-                        ),
-                        child: DropdownButton<String>(
-                          value: _selectedAssignmentClassId,
-                          isExpanded: true,
-                          underline: const SizedBox(),
-                          icon: Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                          style: TextStyle(
-                            fontSize: responsive.fontSizeSmall,
-                            color: AppColors.textPrimary,
-                          ),
-                          items: _classrooms.map((classroom) {
-                            return DropdownMenuItem<String>(
-                              value: classroom['id'],
-                              child: Text(classroom['name']),
-                            );
-                          }).toList(),
-                          onChanged: (value) async {
-                            if (value != null) {
-                              bottomSheetSetState(() {
-                                _selectedAssignmentClassId = value;
-                                _isLoadingAssignments = true;
-                              });
-                              final token = Provider.of<AuthProvider>(context, listen: false).token;
-                              if (token != null) {
-                                await _fetchAssignmentsForClass(token, value);
-                                bottomSheetSetState(() { _isLoadingAssignments = false; });
-                              }
-                            }
-                          },
-                        ),
-                      ),
-                    Expanded(
-                      child: _isLoadingAssignments
-                          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                          : _assignments.isEmpty
-                          ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.assignment_turned_in, size: 64, color: AppColors.grey),
-                            const SizedBox(height: 16),
-                            const Text('No assignments yet', style: TextStyle(color: AppColors.textSecondary)),
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.pop(context);
-                                _showCreateAssignmentDialog();
-                              },
-                              icon: const Icon(Icons.add),
-                              label: const Text('Create Assignment'),
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                            ),
-                          ],
-                        ),
-                      )
-                          : ListView.builder(
-                        controller: scrollController,
-                        itemCount: _assignments.length,
-                        itemBuilder: (context, index) {
-                          final assignment = _assignments[index];
-                          return _buildAssignmentCard(assignment, responsive);
-                        },
+                    const Text(
+                      'No assignments yet',
+                      style: TextStyle(color: kTextSecondary),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showCreateAssignmentDialog();
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Assignment'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kPrimary,
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ],
                 ),
-              );
-            },
-          );
-        },
+              )
+                  : ListView.builder(
+                padding: EdgeInsets.all(resp.padding),
+                itemCount: _assignments.length,
+                itemBuilder: (context, index) {
+                  final assignment = _assignments[index];
+                  return _buildAssignmentCard(assignment, resp);
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildAssignmentCard(Map<String, dynamic> assignment, ResponsiveData responsive) {
+  Widget _buildAssignmentCard(Map<String, dynamic> assignment, ResponsiveData resp) {
     final dueDate = DateTime.tryParse(assignment['dueDate'] ?? '');
     final isOverdue = dueDate != null && dueDate.isBefore(DateTime.now());
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(responsive.padding),
+      padding: EdgeInsets.all(resp.padding),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isOverdue ? AppColors.error.withOpacity(0.3) : AppColors.primary.withOpacity(0.2)),
+        color: kCardBg,
+        borderRadius: BorderRadius.circular(resp.radius),
+        border: Border.all(color: isOverdue ? kDanger.withOpacity(0.3) : kBorder),
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1600,12 +1543,16 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           Row(
             children: [
               Container(
-                padding: EdgeInsets.all(responsive.isMobile ? 8 : 10),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: isOverdue ? AppColors.error.withOpacity(0.1) : AppColors.primary.withOpacity(0.1),
+                  color: isOverdue ? kDanger.withOpacity(0.1) : kPrimary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.assignment, color: isOverdue ? AppColors.error : AppColors.primary, size: responsive.fontSizeMedium),
+                child: Icon(
+                  Icons.assignment,
+                  color: isOverdue ? kDanger : kPrimary,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1616,32 +1563,32 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       assignment['title'] ?? 'Untitled',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.fontSizeSmall,
-                        color: AppColors.textPrimary,
+                        fontSize: resp.fontSizeBody,
+                        color: kTextPrimary,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Due: ${_formatDate(assignment['dueDate'])}',
                       style: TextStyle(
-                        fontSize: responsive.fontSizeSmall - 2,
-                        color: isOverdue ? AppColors.error : AppColors.textSecondary,
+                        fontSize: resp.fontSizeSmall,
+                        color: isOverdue ? kDanger : kTextSecondary,
                       ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isOverdue ? AppColors.error.withOpacity(0.1) : AppColors.success.withOpacity(0.1),
+                  color: isOverdue ? kDanger.withOpacity(0.1) : kSuccess.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   isOverdue ? 'Overdue' : 'Active',
                   style: TextStyle(
-                    fontSize: responsive.fontSizeSmall - 2,
-                    color: isOverdue ? AppColors.error : AppColors.success,
+                    fontSize: resp.fontSizeCaption,
+                    color: isOverdue ? kDanger : kSuccess,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -1651,27 +1598,33 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           const SizedBox(height: 12),
           Text(
             assignment['description'] ?? 'No description',
-            style: TextStyle(fontSize: responsive.fontSizeSmall - 1, color: AppColors.textSecondary),
+            style: TextStyle(
+              fontSize: resp.fontSizeSmall,
+              color: kTextSecondary,
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.class_, size: responsive.fontSizeSmall, color: AppColors.primary),
+              Icon(Icons.class_, size: 16, color: kPrimary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   assignment['classroom']?['name'] ?? _selectedClassName,
-                  style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    fontSize: resp.fontSizeSmall,
+                    color: kTextSecondary,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               TextButton.icon(
-                onPressed: () => _showAssignmentDetails(assignment, responsive),
-                icon: Icon(Icons.visibility, size: responsive.fontSizeSmall),
-                label: Text('Details', style: TextStyle(fontSize: responsive.fontSizeSmall - 2)),
-                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                onPressed: () => _showAssignmentDetails(assignment, resp),
+                icon: Icon(Icons.visibility, size: 18),
+                label: Text('Details', style: TextStyle(fontSize: resp.fontSizeSmall)),
+                style: TextButton.styleFrom(foregroundColor: kPrimary),
               ),
             ],
           ),
@@ -1680,16 +1633,20 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  void _showAssignmentDetails(Map<String, dynamic> assignment, ResponsiveData responsive) {
+  void _showAssignmentDetails(Map<String, dynamic> assignment, ResponsiveData resp) {
     final dueDate = DateTime.tryParse(assignment['dueDate'] ?? '');
     final isOverdue = dueDate != null && dueDate.isBefore(DateTime.now());
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(assignment['title'] ?? 'Assignment Details', style: const TextStyle(color: AppColors.primary)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          assignment['title'] ?? 'Assignment Details',
+          style: const TextStyle(color: kPrimary),
+        ),
         content: SizedBox(
-          width: responsive.isMobile ? null : 400,
+          width: resp.isMobile ? null : 400,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -1697,28 +1654,34 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
+                  color: kPrimary.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Description', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Description',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 8),
-                    Text(assignment['description'] ?? 'No description', style: const TextStyle(color: AppColors.textSecondary)),
+                    Text(
+                      assignment['description'] ?? 'No description',
+                      style: TextStyle(color: kTextSecondary),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.greyLight,
-                  borderRadius: BorderRadius.circular(8),
+                  color: kBorder,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.calendar_today, size: 20, color: isOverdue ? AppColors.error : AppColors.primary),
+                    Icon(Icons.calendar_today, size: 20, color: isOverdue ? kDanger : kPrimary),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1730,7 +1693,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                             _formatDate(assignment['dueDate']),
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: isOverdue ? AppColors.error : AppColors.textPrimary,
+                              color: isOverdue ? kDanger : kTextPrimary,
                             ),
                           ),
                         ],
@@ -1743,17 +1706,17 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isOverdue ? AppColors.error.withOpacity(0.1) : AppColors.success.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  color: isOverdue ? kDanger.withOpacity(0.1) : kSuccess.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
-                    Icon(isOverdue ? Icons.warning : Icons.check_circle, color: isOverdue ? AppColors.error : AppColors.success),
+                    Icon(isOverdue ? Icons.warning : Icons.check_circle, color: isOverdue ? kDanger : kSuccess),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         isOverdue ? 'This assignment is overdue' : 'This assignment is active',
-                        style: TextStyle(color: isOverdue ? AppColors.error : AppColors.success),
+                        style: TextStyle(color: isOverdue ? kDanger : kSuccess),
                       ),
                     ),
                   ],
@@ -1762,12 +1725,16 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             ],
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
 
-  // Attendance methods
   bool _isAttendanceSavedForDate(DateTime date) {
     return _savedAttendanceDates.contains('${date.year}-${date.month}-${date.day}');
   }
@@ -1789,7 +1756,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
     );
-    if (picked != null) setState(() { _attendanceDate = picked; });
+    if (picked != null) setState(() => _attendanceDate = picked);
   }
 
   void _markAllAttendance(bool present) {
@@ -1805,7 +1772,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final token = Provider.of<AuthProvider>(context, listen: false).token;
     if (token == null) return;
 
-    setState(() { _isSavingAttendance = true; });
+    setState(() => _isSavingAttendance = true);
 
     String dateKey = '${_attendanceDate.year}-${_attendanceDate.month}-${_attendanceDate.day}';
     int successCount = 0;
@@ -1830,14 +1797,16 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ Attendance saved for $successCount students!'), backgroundColor: AppColors.success),
+      SnackBar(
+        content: Text('✅ Attendance saved for $successCount students!'),
+        backgroundColor: kSuccess,
+      ),
     );
   }
 
-  // Results methods
   Future<void> _saveSubjectScores(Map<String, dynamic> subject) async {
     final token = Provider.of<AuthProvider>(context, listen: false).token;
-    setState(() { _isSavingResults = true; });
+    setState(() => _isSavingResults = true);
 
     final subjectId = subject['id'].toString();
     final subjectName = subject['name'].toString();
@@ -1857,8 +1826,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
 
     if (scores.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No scores to save'), backgroundColor: AppColors.warning));
-      setState(() { _isSavingResults = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No scores to save'), backgroundColor: kWarning),
+      );
+      setState(() => _isSavingResults = false);
       return;
     }
 
@@ -1870,8 +1841,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         'scores': scores,
         'timestamp': DateTime.now().toIso8601String(),
       });
-      setState(() { _isSavingResults = false; });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Scores saved locally! Will sync when online.'), backgroundColor: AppColors.success));
+      setState(() => _isSavingResults = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Scores saved locally! Will sync when online.'),
+          backgroundColor: kSuccess,
+        ),
+      );
       return;
     }
 
@@ -1886,10 +1862,15 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       scores: scores,
     );
 
-    setState(() { _isSavingResults = false; });
+    setState(() => _isSavingResults = false);
 
     if (result['success']) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Scores for $subjectName saved!'), backgroundColor: AppColors.success));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Scores for $subjectName saved!'),
+          backgroundColor: kSuccess,
+        ),
+      );
     } else {
       await _localStorage.queuePendingScores({
         'subjectId': subjectId,
@@ -1898,20 +1879,26 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         'scores': scores,
         'timestamp': DateTime.now().toIso8601String(),
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${result['message']}. Saved locally.'), backgroundColor: AppColors.warning));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${result['message']}. Saved locally.'),
+          backgroundColor: kWarning,
+        ),
+      );
     }
   }
 
   Color _getScoreColor(int score) {
-    if (score >= 70) return AppColors.success;
-    if (score >= 50) return AppColors.warning;
-    return AppColors.error;
+    if (score >= 70) return kSuccess;
+    if (score >= 50) return kWarning;
+    return kDanger;
   }
 
-  // UI Build methods
   void _handleActivityTap(String action) {
     switch (action) {
-      case 'Take Attendance': setState(() => _selectedIndex = 2); break;
+      case 'Take Attendance':
+        setState(() => _selectedIndex = 2);
+        break;
       case 'Record Results':
         if (_subjects.isEmpty) {
           _showAddSubjectDialog();
@@ -1919,55 +1906,78 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           setState(() => _selectedIndex = 3);
         }
         break;
-      case 'Add Subject': _showAddSubjectDialog(); break;
-      case 'Create Assignment': _showCreateAssignmentDialog(); break;
-      case 'Chat with Parents': _navigateToChatList(); break;
-      case 'View Students': setState(() => _selectedIndex = 1); break;
+      case 'Add Subject':
+        _showAddSubjectDialog();
+        break;
+      case 'Create Assignment':
+        _showCreateAssignmentDialog();
+        break;
+      case 'Chat with Parents':
+        _navigateToChatList();
+        break;
+      case 'View Students':
+        setState(() => _selectedIndex = 1);
+        break;
     }
   }
 
   void _showAddSubjectDialog() {
     _subjectNameController.clear();
     _subjectDescriptionController.clear();
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add New Subject', style: TextStyle(color: AppColors.primary)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add New Subject', style: TextStyle(color: kPrimary)),
         content: SizedBox(
-          width: responsive.isMobile ? null : 400,
+          width: resp.isMobile ? null : 400,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: _subjectNameController,
-                decoration: const InputDecoration(labelText: 'Subject Name *', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'Subject Name *',
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _subjectDescriptionController,
-                decoration: const InputDecoration(labelText: 'Description (Optional)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'Description (Optional)',
+                  border: OutlineInputBorder(),
+                ),
                 maxLines: 3,
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final subjectName = _subjectNameController.text.trim();
               if (subjectName.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a subject name'), backgroundColor: AppColors.warning));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a subject name'),
+                    backgroundColor: kWarning,
+                  ),
+                );
                 return;
               }
 
-              setState(() { _isAddingSubject = true; });
+              setState(() => _isAddingSubject = true);
 
               final token = Provider.of<AuthProvider>(context, listen: false).token;
               if (token == null) {
-                setState(() { _isAddingSubject = false; });
+                setState(() => _isAddingSubject = false);
                 return;
               }
 
@@ -1981,25 +1991,33 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                 description: _subjectDescriptionController.text.trim().isEmpty ? 'No description' : _subjectDescriptionController.text.trim(),
               );
 
-              setState(() { _isAddingSubject = false; });
+              setState(() => _isAddingSubject = false);
 
               if (result['success']) {
-                final subjectData = result['data'];
-                final newSubject = {
-                  'id': subjectData['subjectId'],
-                  'name': subjectName,
-                  'description': _subjectDescriptionController.text.trim().isEmpty ? 'No description' : _subjectDescriptionController.text.trim(),
-                };
-                await _localStorage.addSubjectLocally(_selectedClassroomId, newSubject);
-                await _loadSubjectsFromLocal();
+                await _fetchSubjectsFromApi(token, _selectedClassroomId);
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Subject "$subjectName" added!'), backgroundColor: AppColors.success));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Subject "$subjectName" added!'),
+                    backgroundColor: kSuccess,
+                  ),
+                );
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message']), backgroundColor: AppColors.error));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result['message'] ?? 'Failed to add subject'),
+                    backgroundColor: kDanger,
+                  ),
+                );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: _isAddingSubject ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Add Subject'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              foregroundColor: Colors.white,
+            ),
+            child: _isAddingSubject
+                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Add Subject'),
           ),
         ],
       ),
@@ -2007,28 +2025,32 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   }
 
   void _showStudentDetails(Map<String, dynamic> student) {
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(student['name'], style: const TextStyle(color: AppColors.primary)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(student['name'], style: const TextStyle(color: kPrimary)),
         content: SizedBox(
-          width: responsive.isMobile ? null : 400,
+          width: resp.isMobile ? null : 400,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildDetailRow('Admission', student['admissionNo'], responsive),
-              _buildDetailRow('Class', student['className'], responsive),
+              _buildDetailRow('Admission', student['admissionNo'], resp),
+              _buildDetailRow('Class', student['className'], resp),
               const SizedBox(height: 12),
-              const Text('Parent Information', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const Text(
+                'Parent Information',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
               const SizedBox(height: 8),
-              _buildDetailRow('Name', student['parentName'], responsive),
-              _buildDetailRow('Email', student['parentEmail'], responsive),
+              _buildDetailRow('Name', student['parentName'], resp),
+              _buildDetailRow('Email', student['parentEmail'], resp),
               InkWell(
                 onTap: () => _makePhoneCall(student['parentPhone']),
-                child: _buildDetailRow('Phone', student['parentPhone'], responsive, isClickable: true),
+                child: _buildDetailRow('Phone', student['parentPhone'], resp, isClickable: true),
               ),
             ],
           ),
@@ -2041,14 +2063,20 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             },
             icon: const Icon(Icons.message),
             label: const Text('Message Parent'),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              foregroundColor: Colors.white,
+            ),
           ),
           if (student['parentPhone'] != null && student['parentPhone'].toString().isNotEmpty)
             ElevatedButton.icon(
               onPressed: () => _makePhoneCall(student['parentPhone']),
               icon: const Icon(Icons.phone),
               label: const Text('Call Parent'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kSuccess,
+                foregroundColor: Colors.white,
+              ),
             ),
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -2059,20 +2087,20 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, ResponsiveData responsive, {bool isClickable = false}) {
+  Widget _buildDetailRow(String label, String value, ResponsiveData resp, {bool isClickable = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: responsive.isMobile ? 70 : 80,
+            width: resp.isMobile ? 70 : 80,
             child: Text(
               label,
               style: TextStyle(
-                fontSize: responsive.fontSizeSmall - 1,
+                fontSize: resp.fontSizeSmall,
                 fontWeight: FontWeight.w500,
-                color: AppColors.textSecondary,
+                color: kTextSecondary,
               ),
             ),
           ),
@@ -2080,14 +2108,14 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             child: Text(
               value,
               style: TextStyle(
-                fontSize: responsive.fontSizeSmall - 1,
-                color: isClickable ? AppColors.primary : AppColors.textPrimary,
+                fontSize: resp.fontSizeSmall,
+                color: isClickable ? kPrimary : kTextPrimary,
                 decoration: isClickable ? TextDecoration.underline : null,
               ),
             ),
           ),
           if (isClickable && value.isNotEmpty && value != 'N/A')
-            Icon(Icons.phone, size: 16, color: AppColors.primary),
+            Icon(Icons.phone, size: 16, color: kPrimary),
         ],
       ),
     );
@@ -2096,7 +2124,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   Future<void> _makePhoneCall(String phoneNumber) async {
     if (phoneNumber.isEmpty || phoneNumber == 'N/A') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available'), backgroundColor: AppColors.warning),
+        const SnackBar(content: Text('Phone number not available'), backgroundColor: kWarning),
       );
       return;
     }
@@ -2118,7 +2146,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: AppColors.error),
+        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: kDanger),
       );
     }
   }
@@ -2127,19 +2155,29 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Logout', style: TextStyle(color: AppColors.error)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Logout', style: TextStyle(color: kDanger)),
         content: const Text('Are you sure you want to logout?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final authProvider = Provider.of<AuthProvider>(context, listen: false);
               await authProvider.logout();
               if (mounted) {
-                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kDanger,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Logout'),
           ),
         ],
@@ -2148,55 +2186,112 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   }
 
   void _showAttendanceHistory() {
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * (responsive.isMobile ? 0.7 : 0.6),
-        width: responsive.isDesktop ? 800 : double.infinity,
-        padding: EdgeInsets.all(responsive.padding),
-        child: FutureBuilder(
-          future: _apiService.getAttendanceByActiveTerm(
-            token: Provider.of<AuthProvider>(context, listen: false).token!,
-            schoolId: _currentUser.schoolId,
-            classroomId: _selectedClassroomId,
-          ),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator(color: AppColors.primary));
-            }
-            if (!snapshot.hasData || snapshot.data == null || !snapshot.data!['success']) {
-              return const Center(child: Text('No attendance records found'));
-            }
-            final records = snapshot.data!['data'] as List? ?? [];
-            if (records.isEmpty) {
-              return const Center(child: Text('No attendance records found'));
-            }
-            return Column(
-              children: [
-                Text('Attendance History', style: TextStyle(fontSize: responsive.fontSizeLarge, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: ListView.builder(
+        height: MediaQuery.of(context).size.height * (resp.isMobile ? 0.8 : 0.7),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(resp.padding),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: kBorder)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Attendance History',
+                    style: TextStyle(
+                      fontSize: resp.fontSizeH2,
+                      fontWeight: FontWeight.bold,
+                      color: kSecondary,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: kSecondary),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder(
+                future: _apiService.getAttendanceByActiveTerm(
+                  token: Provider.of<AuthProvider>(context, listen: false).token!,
+                  schoolId: _currentUser.schoolId,
+                  classroomId: _selectedClassroomId,
+                ),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator(color: kPrimary));
+                  }
+                  if (!snapshot.hasData || snapshot.data == null || !snapshot.data!['success']) {
+                    return const Center(child: Text('No attendance records found'));
+                  }
+                  final records = snapshot.data!['data'] as List? ?? [];
+                  if (records.isEmpty) {
+                    return const Center(child: Text('No attendance records found'));
+                  }
+                  return ListView.builder(
+                    padding: EdgeInsets.all(resp.padding),
                     itemCount: records.length,
                     itemBuilder: (context, index) {
                       final record = records[index];
                       return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: ListTile(
-                          leading: Icon(record['status'] == 1 ? Icons.check_circle : Icons.cancel, color: record['status'] == 1 ? AppColors.success : AppColors.error),
-                          title: Text(record['studentName'] ?? 'Student'),
-                          subtitle: Text('Date: ${record['date']?.toString().split('T')[0] ?? 'N/A'}'),
-                          trailing: Text(record['status'] == 1 ? 'Present' : 'Absent', style: TextStyle(color: record['status'] == 1 ? AppColors.success : AppColors.error)),
+                          leading: CircleAvatar(
+                            backgroundColor: record['status'] == 1
+                                ? kSuccess.withOpacity(0.1)
+                                : kDanger.withOpacity(0.1),
+                            child: Icon(
+                              record['status'] == 1 ? Icons.check : Icons.close,
+                              color: record['status'] == 1 ? kSuccess : kDanger,
+                            ),
+                          ),
+                          title: Text(
+                            record['studentName'] ?? 'Student',
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                          subtitle: Text(
+                            'Date: ${record['date']?.toString().split('T')[0] ?? 'N/A'}',
+                          ),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: record['status'] == 1
+                                  ? kSuccess.withOpacity(0.1)
+                                  : kDanger.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              record['status'] == 1 ? 'Present' : 'Absent',
+                              style: TextStyle(
+                                color: record['status'] == 1 ? kSuccess : kDanger,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     },
-                  ),
-                ),
-              ],
-            );
-          },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2204,64 +2299,90 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     return Scaffold(
-      body: Container(
-        color: AppColors.background,
-        child: SafeArea(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-              : _errorMessage != null
-              ? _buildErrorView(responsive)
-              : RefreshIndicator(
-            onRefresh: _refreshData,
-            color: AppColors.primary,
-            child: _selectedIndex == 0
-                ? _buildHomeScreen(responsive)
-                : _buildScreenForIndex(_selectedIndex, responsive),
-          ),
+      backgroundColor: kBackground,
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: kPrimary))
+            : _errorMessage != null
+            ? _buildErrorView(resp)
+            : RefreshIndicator(
+          onRefresh: _refreshData,
+          color: kPrimary,
+          child: _selectedIndex == 0
+              ? _buildHomeScreen(resp)
+              : _buildScreenForIndex(_selectedIndex, resp),
         ),
       ),
-      bottomNavigationBar: _isLoading || _errorMessage != null ? null : _buildBottomNavigationBar(responsive),
+      bottomNavigationBar: _isLoading || _errorMessage != null ? null : _buildBottomNavigationBar(resp),
     );
   }
 
-  Widget _buildErrorView(ResponsiveData responsive) {
+  Widget _buildErrorView(ResponsiveData resp) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, size: 64, color: AppColors.error),
+          Icon(Icons.error_outline, size: 64, color: kDanger),
           const SizedBox(height: 16),
-          Text(_errorMessage!, style: TextStyle(color: AppColors.textSecondary, fontSize: responsive.fontSizeMedium)),
+          Text(
+            _errorMessage!,
+            style: TextStyle(color: kTextSecondary, fontSize: resp.fontSizeBody),
+          ),
           const SizedBox(height: 24),
-          ElevatedButton(onPressed: _fetchDashboardData, style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary), child: const Text('Retry')),
+          ElevatedButton(
+            onPressed: _fetchDashboardData,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Retry'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildBottomNavigationBar(ResponsiveData responsive) {
+  Widget _buildBottomNavigationBar(ResponsiveData resp) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)],
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
       child: BottomNavigationBar(
-        type: responsive.isMobile ? BottomNavigationBarType.fixed : BottomNavigationBarType.shifting,
+        type: resp.isMobile ? BottomNavigationBarType.fixed : BottomNavigationBarType.shifting,
         backgroundColor: Colors.transparent,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.grey,
+        selectedItemColor: kPrimary,
+        unselectedItemColor: kTextSecondary,
         currentIndex: _selectedIndex,
         elevation: 0,
         onTap: (index) => setState(() => _selectedIndex = index),
         items: [
-          const BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded), label: 'Home'),
-          const BottomNavigationBarItem(icon: Icon(Icons.people_rounded), label: 'Students'),
-          const BottomNavigationBarItem(icon: Icon(Icons.checklist_rounded), label: 'Attendance'),
-          const BottomNavigationBarItem(icon: Icon(Icons.grade_rounded), label: 'Results'),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_rounded),
+            label: 'Home',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.people_rounded),
+            label: 'Students',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.checklist_rounded),
+            label: 'Attendance',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.grade_rounded),
+            label: 'Results',
+          ),
           BottomNavigationBarItem(
             icon: Stack(
               children: [
@@ -2294,192 +2415,332 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             ),
             label: 'Messages',
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.more_horiz_rounded), label: 'More'),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.more_horiz_rounded),
+            label: 'More',
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildHomeScreen(ResponsiveData responsive) {
+  Widget _buildHomeScreen(ResponsiveData resp) {
     return SingleChildScrollView(
-      padding: EdgeInsets.all(responsive.padding),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: responsive.isDesktop ? 1400 : double.infinity,
+      padding: EdgeInsets.all(resp.padding),
+      child: Column(
+        children: [
+          _buildHeader(resp),
+          const SizedBox(height: 16),
+          ClockInOutWidget(
+            user: _currentUser,
+            apiService: _apiService,
+            onStatusChanged: () {
+              print('Clock status changed');
+            },
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(responsive),
-              const SizedBox(height: 16),
-
-              // ============ CLOCK IN/OUT WIDGET ============
-              ClockInOutWidget(
-                user: _currentUser,
-                apiService: _apiService,
-                onStatusChanged: () {
-                  // Refresh any data that depends on clock status
-                  print('Clock status changed');
+          const SizedBox(height: 20),
+          if (_classrooms.length > 1)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kBorder),
+              ),
+              child: DropdownButton<String>(
+                value: _selectedClassroomId,
+                dropdownColor: Colors.white,
+                underline: const SizedBox(),
+                icon: Icon(Icons.arrow_drop_down, color: kPrimary),
+                style: TextStyle(
+                  color: kTextPrimary,
+                  fontSize: resp.fontSizeBody,
+                ),
+                isExpanded: true,
+                items: _classrooms.map((classroom) {
+                  return DropdownMenuItem<String>(
+                    value: classroom['id'],
+                    child: Text(classroom['name']),
+                  );
+                }).toList(),
+                onChanged: (value) async {
+                  if (value != null) {
+                    setState(() {
+                      _selectedClassroomId = value;
+                      _selectedClassName = _classrooms.firstWhere((c) => c['id'] == value)['name'];
+                      _isLoading = true;
+                    });
+                    final token = Provider.of<AuthProvider>(context, listen: false).token;
+                    if (token != null) {
+                      await _fetchStudents(token, value);
+                      await _fetchSubjectsFromApi(token, value);
+                      await _fetchAssignments(token);
+                    }
+                    setState(() => _isLoading = false);
+                  }
                 },
               ),
-              const SizedBox(height: 16),
-
-              if (_classrooms.length > 1)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(20)),
-                  child: DropdownButton<String>(
-                    value: _selectedClassroomId,
-                    dropdownColor: AppColors.white,
-                    underline: const SizedBox(),
-                    icon: Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                    style: TextStyle(color: AppColors.textPrimary, fontSize: responsive.fontSizeSmall),
-                    items: _classrooms.map((classroom) => DropdownMenuItem<String>(value: classroom['id'], child: Text(classroom['name']))).toList(),
-                    onChanged: (value) async {
-                      if (value != null) {
-                        setState(() {
-                          _selectedClassroomId = value;
-                          _selectedClassName = _classrooms.firstWhere((c) => c['id'] == value)['name'];
-                          _isLoading = true;
-                        });
-                        final token = Provider.of<AuthProvider>(context, listen: false).token;
-                        if (token != null) {
-                          await _fetchStudents(token, value);
-                          await _loadSubjectsFromLocal();
-                          await _fetchAssignments(token);
-                        }
-                        setState(() { _isLoading = false; });
-                      }
-                    },
-                  ),
-                ),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: responsive.gridCrossAxisCount,
-                mainAxisSpacing: responsive.padding,
-                crossAxisSpacing: responsive.padding,
-                childAspectRatio: responsive.isMobile ? 1.4 : 1.6,
-                children: [
-                  _buildStatCard('Total Students', _students.length.toString(), Icons.people, AppColors.primary, responsive),
-                  _buildStatCard('Present Today', '${_getTodayAttendanceCount()}/${_students.length}', Icons.check_circle, AppColors.success, responsive),
-                  _buildStatCard('Class', _selectedClassName, Icons.class_, AppColors.warning, responsive),
-                  _buildStatCard('Subjects', _subjects.length.toString(), Icons.book, AppColors.info, responsive),
-                  _buildStatCard('Assignments', _assignments.length.toString(), Icons.assignment, AppColors.info, responsive),
-                  _buildStatCard('Messages', _unreadMessageCount.toString(), Icons.message, AppColors.primary, responsive),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _buildActivitySlideshow(responsive),
-              const SizedBox(height: 16),
-              _buildQuickActions(responsive),
-              const SizedBox(height: 16),
-              _buildAssignmentsPreview(responsive),
-              const SizedBox(height: 16),
-              _buildNewsSection(responsive),
-            ],
-          ),
-        ),
+            ),
+          _buildStatsGrid(resp),
+          const SizedBox(height: 20),
+          _buildActivitySlideshow(resp),
+          const SizedBox(height: 20),
+          _buildQuickActions(resp),
+          const SizedBox(height: 20),
+          _buildAssignmentsPreview(resp),
+          const SizedBox(height: 20),
+          _buildNewsSection(resp),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }
 
-  Widget _buildHeader(ResponsiveData responsive) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Welcome back,', style: TextStyle(color: AppColors.textSecondary, fontSize: responsive.fontSizeSmall)),
-              const SizedBox(height: 4),
-              Text(
-                _currentUser.name.isNotEmpty ? _currentUser.name : 'Teacher',
-                style: TextStyle(color: AppColors.textPrimary, fontSize: responsive.fontSizeHeader, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-              Text(
-                _currentUser.schoolName,
-                style: TextStyle(color: AppColors.textSecondary, fontSize: responsive.fontSizeSmall),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+  Widget _buildHeader(ResponsiveData resp) {
+    return Container(
+      padding: EdgeInsets.all(resp.padding),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(resp.radius),
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
-        ),
-        Stack(
-          children: [
-            Container(
-              width: responsive.isMobile ? 45 : 55,
-              height: responsive.isMobile ? 45 : 55,
-              decoration: BoxDecoration(gradient: AppColors.cardGradient, shape: BoxShape.circle, boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 10)]),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.message, size: responsive.fontSizeMedium + 4, color: Colors.white),
-                onPressed: _navigateToMessages,
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: resp.isMobile ? 50 : 60,
+            height: resp.isMobile ? 50 : 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [kPrimary, kPrimaryDark],
               ),
+              shape: BoxShape.circle,
             ),
-            if (_unreadMessageCount > 0)
-              Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  constraints: const BoxConstraints(
-                    minWidth: 16,
-                    minHeight: 16,
-                  ),
-                  child: Text(
-                    '$_unreadMessageCount',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+            child: Center(
+              child: Text(
+                _currentUser.name.isNotEmpty ? _currentUser.name[0].toUpperCase() : 'T',
+                style: TextStyle(
+                  fontSize: resp.fontSizeH2,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
               ),
-          ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Hello, ${_currentUser.name.split(' ').first}!',
+                  style: TextStyle(
+                    fontSize: resp.fontSizeH3,
+                    fontWeight: FontWeight.bold,
+                    color: kTextPrimary,
+                  ),
+                ),
+                Text(
+                  _currentUser.schoolName,
+                  style: TextStyle(
+                    fontSize: resp.fontSizeSmall,
+                    color: kTextSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: kPrimary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _selectedClassName,
+                    style: TextStyle(
+                      fontSize: resp.fontSizeCaption,
+                      color: kPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Stack(
+            children: [
+              IconButton(
+                icon: Icon(
+                  Icons.message_rounded,
+                  color: kPrimary,
+                  size: resp.isMobile ? 24 : 28,
+                ),
+                onPressed: _navigateToMessages,
+              ),
+              if (_unreadMessageCount > 0)
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '$_unreadMessageCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsGrid(ResponsiveData resp) {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: resp.gridColumns,
+      mainAxisSpacing: resp.spacing,
+      crossAxisSpacing: resp.spacing,
+      childAspectRatio: 1.2,
+      children: [
+        _buildStatCard(
+          icon: Icons.people,
+          value: _students.length.toString(),
+          label: 'Students',
+          color: kPrimary,
+        ),
+        _buildStatCard(
+          icon: Icons.check_circle,
+          value: '${_getTodayAttendanceCount()}/${_students.length}',
+          label: 'Present Today',
+          color: kSuccess,
+        ),
+        _buildStatCard(
+          icon: Icons.class_,
+          value: _selectedClassName,
+          label: 'Class',
+          color: kWarning,
+        ),
+        _buildStatCard(
+          icon: Icons.book,
+          value: _subjects.length.toString(),
+          label: 'Subjects',
+          color: kInfo,
+        ),
+        _buildStatCard(
+          icon: Icons.assignment,
+          value: _assignments.length.toString(),
+          label: 'Assignments',
+          color: kPurple,
+        ),
+        _buildStatCard(
+          icon: Icons.message,
+          value: _unreadMessageCount.toString(),
+          label: 'Messages',
+          color: kPrimary,
         ),
       ],
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color, ResponsiveData responsive) {
+  Widget _buildStatCard({
+    required IconData icon,
+    required String value,
+    required String label,
+    required Color color,
+  }) {
     return Container(
-      padding: EdgeInsets.all(responsive.padding),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(responsive.isMobile ? 14 : 16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: responsive.cardElevation * 2)],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: responsive.fontSizeMedium + 4, color: color),
-          const SizedBox(height: 4),
-          Text(value, style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: kTextPrimary,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 2),
-          Text(title, style: TextStyle(fontSize: responsive.fontSizeSmall - 1, color: AppColors.textSecondary), textAlign: TextAlign.center),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: kTextSecondary,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildActivitySlideshow(ResponsiveData responsive) {
+  Widget _buildActivitySlideshow(ResponsiveData resp) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text('✨ Teacher Activities', style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold))),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            '✨ Teacher Activities',
+            style: TextStyle(
+              fontSize: resp.fontSizeH3,
+              fontWeight: FontWeight.bold,
+              color: kTextPrimary,
+            ),
+          ),
+        ),
         SizedBox(
-          height: responsive.slideshowHeight,
+          height: resp.slideshowHeight,
           child: PageView.builder(
             controller: _pageController,
             onPageChanged: (index) => setState(() => _currentSlideIndex = index),
@@ -2488,41 +2749,88 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               final slide = _activitySlides[index];
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(gradient: AppColors.cardGradient, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 10)]),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [kPrimary, kPrimaryDark],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: kPrimary.withOpacity(0.3),
+                      blurRadius: 15,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
                     onTap: () => _handleActivityTap(slide['action'] as String),
                     borderRadius: BorderRadius.circular(16),
                     child: Padding(
-                      padding: EdgeInsets.all(responsive.padding),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      padding: EdgeInsets.all(resp.padding),
+                      child: Row(
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: EdgeInsets.all(responsive.isMobile ? 8 : 10),
-                                decoration: BoxDecoration(color: AppColors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                child: Icon(slide['icon'] as IconData, size: responsive.fontSizeMedium, color: AppColors.white),
-                              ),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(color: AppColors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                                child: Text('${index + 1}/${_activitySlides.length}', style: TextStyle(color: AppColors.white, fontSize: responsive.fontSizeSmall - 1)),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(slide['title'] as String, style: TextStyle(fontSize: responsive.fontSizeSmall + 2, fontWeight: FontWeight.bold, color: AppColors.white)),
-                          const SizedBox(height: 4),
-                          Text(slide['description'] as String, style: TextStyle(fontSize: responsive.fontSizeSmall - 1, color: AppColors.white.withOpacity(0.9))),
-                          const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(8)),
-                            child: Text(slide['action'] as String, style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: responsive.fontSizeSmall - 1)),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              slide['icon'] as IconData,
+                              size: 28,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  slide['title'] as String,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  slide['description'] as String,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.white.withOpacity(0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    slide['action'] as String,
+                                    style: TextStyle(
+                                      color: kPrimary,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            '${index + 1}/${_activitySlides.length}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -2540,9 +2848,12 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             _activitySlides.length,
                 (index) => Container(
               margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: responsive.isMobile ? 5 : 6,
-              height: responsive.isMobile ? 5 : 6,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: _currentSlideIndex == index ? AppColors.primary : AppColors.grey),
+              width: resp.isMobile ? 5 : 6,
+              height: resp.isMobile ? 5 : 6,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _currentSlideIndex == index ? kPrimary : kBorder,
+              ),
             ),
           ),
         ),
@@ -2550,74 +2861,122 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildQuickActions(ResponsiveData responsive) {
+  Widget _buildQuickActions(ResponsiveData resp) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Quick Actions', style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold)),
+        Text(
+          'Quick Actions',
+          style: TextStyle(
+            fontSize: resp.fontSizeH3,
+            fontWeight: FontWeight.bold,
+            color: kTextPrimary,
+          ),
+        ),
         const SizedBox(height: 10),
         GridView.count(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: responsive.quickActionsCount,
-          mainAxisSpacing: responsive.padding,
-          crossAxisSpacing: responsive.padding,
+          crossAxisCount: resp.quickActionsCount,
+          mainAxisSpacing: resp.spacing,
+          crossAxisSpacing: resp.spacing,
           childAspectRatio: 1,
           children: [
-            _buildActionTile(Icons.checklist, 'Take\nAttendance', () => setState(() => _selectedIndex = 2), responsive),
-            _buildActionTile(Icons.grade, 'Record\nResults', () => _subjects.isEmpty ? _showAddSubjectDialog() : setState(() => _selectedIndex = 3), responsive),
-            _buildActionTile(Icons.library_add, 'Add\nSubject', _showAddSubjectDialog, responsive),
-            _buildActionTile(Icons.assignment_add, 'Create\nAssignment', _showCreateAssignmentDialog, responsive),
-            _buildActionTile(Icons.chat, 'Chat with\nParents', _navigateToChatList, responsive),
-            _buildActionTile(Icons.people, 'View\nStudents', () => setState(() => _selectedIndex = 1), responsive),
+            _buildActionTile(Icons.checklist, 'Attendance', () => setState(() => _selectedIndex = 2), resp),
+            _buildActionTile(Icons.grade, 'Results', () => {
+              if (_subjects.isEmpty) {
+                _showAddSubjectDialog()
+              } else {
+                setState(() => _selectedIndex = 3)
+              }
+            }, resp),
+            _buildActionTile(Icons.library_add, 'Add Subject', _showAddSubjectDialog, resp),
+            _buildActionTile(Icons.assignment_add, 'Assignment', _showCreateAssignmentDialog, resp),
+            _buildActionTile(Icons.chat, 'Chat Parents', _navigateToChatList, resp),
+            _buildActionTile(Icons.people, 'Students', () => setState(() => _selectedIndex = 1), resp),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildActionTile(IconData icon, String label, VoidCallback onTap, ResponsiveData responsive) {
+  Widget _buildActionTile(IconData icon, String label, VoidCallback onTap, ResponsiveData resp) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: EdgeInsets.symmetric(vertical: responsive.padding),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          gradient: AppColors.cardGradientLight,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+          boxShadow: [
+            BoxShadow(
+              color: kShadow,
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: responsive.fontSizeMedium + 4, color: AppColors.primary),
+            Icon(icon, size: 24, color: kPrimary),
             const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: AppColors.textPrimary, fontSize: responsive.fontSizeSmall - 1, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
+            Text(
+              label,
+              style: TextStyle(
+                color: kTextPrimary,
+                fontSize: resp.fontSizeCaption,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAssignmentsPreview(ResponsiveData responsive) {
+  Widget _buildAssignmentsPreview(ResponsiveData resp) {
     if (_isLoadingAssignments) {
       return Container(
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(16)),
-        child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(child: CircularProgressIndicator(color: kPrimary)),
       );
     }
     if (_assignments.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(40),
-        decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(16)),
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: kShadow,
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
         child: Column(
           children: [
-            Icon(Icons.assignment_turned_in, size: 48, color: AppColors.grey),
+            Icon(Icons.assignment_turned_in, size: 48, color: kBorder),
             const SizedBox(height: 12),
-            Text('No assignments yet', style: TextStyle(color: AppColors.textSecondary)),
+            Text(
+              'No assignments yet',
+              style: TextStyle(color: kTextSecondary),
+            ),
             const SizedBox(height: 8),
-            TextButton.icon(onPressed: _showCreateAssignmentDialog, icon: const Icon(Icons.add), label: const Text('Create First Assignment'), style: TextButton.styleFrom(foregroundColor: AppColors.primary)),
+            TextButton.icon(
+              onPressed: _showCreateAssignmentDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Create First Assignment'),
+              style: TextButton.styleFrom(foregroundColor: kPrimary),
+            ),
           ],
         ),
       );
@@ -2628,31 +2987,54 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Recent Assignments', style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold)),
-            TextButton(onPressed: _showViewAssignmentsScreen, child: const Text('View All')),
+            Text(
+              'Recent Assignments',
+              style: TextStyle(
+                fontSize: resp.fontSizeH3,
+                fontWeight: FontWeight.bold,
+                color: kTextPrimary,
+              ),
+            ),
+            TextButton(
+              onPressed: _showViewAssignmentsScreen,
+              child: const Text('View All'),
+            ),
           ],
         ),
         const SizedBox(height: 8),
         Container(
-          decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: kShadow,
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
           child: ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _assignments.length > 3 ? 3 : _assignments.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
-            itemBuilder: (context, index) => _buildAssignmentCard(_assignments[index], responsive),
+            separatorBuilder: (context, index) => const Divider(height: 1, color: kBorder),
+            itemBuilder: (context, index) => _buildAssignmentCard(_assignments[index], resp),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildNewsSection(ResponsiveData responsive) {
+  Widget _buildNewsSection(ResponsiveData resp) {
     if (_isLoadingNews) {
       return Container(
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(14)),
-        child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(child: CircularProgressIndicator(color: kPrimary)),
       );
     }
     if (_news.isEmpty) return const SizedBox.shrink();
@@ -2660,28 +3042,62 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('School News', style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold)),
+        Text(
+          'School News',
+          style: TextStyle(
+            fontSize: resp.fontSizeH3,
+            fontWeight: FontWeight.bold,
+            color: kTextPrimary,
+          ),
+        ),
         const SizedBox(height: 10),
         Container(
-          decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(14)),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: kShadow,
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
           child: ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _news.length > 3 ? 3 : _news.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
+            separatorBuilder: (context, index) => const Divider(height: 1, color: kBorder),
             itemBuilder: (context, index) {
               final item = _news[index];
               return ListTile(
-                leading: CircleAvatar(backgroundColor: AppColors.primary.withOpacity(0.1), child: Icon(Icons.newspaper, color: AppColors.primary)),
-                title: Text(item['title'], style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(item['date'] ?? 'Recent', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                trailing: Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.primary),
+                leading: CircleAvatar(
+                  backgroundColor: kPrimary.withOpacity(0.1),
+                  child: Icon(Icons.newspaper, color: kPrimary),
+                ),
+                title: Text(
+                  item['title'],
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  item['date'] ?? 'Recent',
+                  style: TextStyle(fontSize: 10, color: kTextSecondary),
+                ),
+                trailing: Icon(Icons.arrow_forward_ios, size: 14, color: kPrimary),
                 onTap: () => showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     title: Text(item['title']),
-                    content: SingleChildScrollView(child: Text(item['content'])),
-                    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+                    content: SingleChildScrollView(
+                      child: Text(item['content']),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Close'),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -2692,52 +3108,71 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  // Screens based on index
-  Widget _buildScreenForIndex(int index, ResponsiveData responsive) {
+  Widget _buildScreenForIndex(int index, ResponsiveData resp) {
     switch (index) {
-      case 1: return _buildStudentsScreen(responsive);
-      case 2: return _buildAttendanceScreen(responsive);
-      case 3: return _buildResultsScreen(responsive);
-      case 4: return _buildMessagesScreen(responsive);
-      case 5: return _buildMoreScreen(responsive);
-      default: return _buildHomeScreen(responsive);
+      case 1: return _buildStudentsScreen(resp);
+      case 2: return _buildAttendanceScreen(resp);
+      case 3: return _buildResultsScreen(resp);
+      case 4: return _buildMessagesScreen(resp);
+      case 5: return _buildMoreScreen(resp);
+      default: return _buildHomeScreen(resp);
     }
   }
 
-  Widget _buildStudentsScreen(ResponsiveData responsive) {
+  Widget _buildStudentsScreen(ResponsiveData resp) {
     return Column(
       children: [
         Container(
-          padding: EdgeInsets.all(responsive.padding),
-          color: AppColors.white,
+          padding: EdgeInsets.all(resp.padding),
+          color: Colors.white,
           child: TextField(
             controller: _searchController,
             onChanged: _filterStudents,
             decoration: InputDecoration(
               hintText: 'Search by name or admission...',
-              prefixIcon: Icon(Icons.search, color: AppColors.primary),
+              prefixIcon: Icon(Icons.search, color: kPrimary),
               suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchController.clear(); _filterStudents(''); })
+                  ? IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  _searchController.clear();
+                  _filterStudents('');
+                },
+              )
                   : null,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
               filled: true,
-              fillColor: AppColors.greyLight,
-              contentPadding: EdgeInsets.symmetric(horizontal: responsive.padding, vertical: responsive.isMobile ? 12 : 16),
+              fillColor: kBackground,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: resp.padding,
+                vertical: resp.isMobile ? 12 : 16,
+              ),
             ),
           ),
         ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshData,
-            color: AppColors.primary,
+            color: kPrimary,
             child: _isSearching && _filteredStudents.isEmpty
-                ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.search_off, size: 48, color: AppColors.grey), SizedBox(height: 12), Text('No students found')]))
-                : responsive.isDesktop
-                ? _buildStudentsTable(responsive)
+                ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.search_off, size: 48, color: kBorder),
+                  SizedBox(height: 12),
+                  Text('No students found'),
+                ],
+              ),
+            )
                 : ListView.builder(
-              padding: EdgeInsets.all(responsive.padding),
+              padding: EdgeInsets.all(resp.padding),
               itemCount: _filteredStudents.length,
-              itemBuilder: (context, index) => _buildStudentCard(_filteredStudents[index], responsive),
+              itemBuilder: (context, index) =>
+                  _buildStudentCard(_filteredStudents[index], resp),
             ),
           ),
         ),
@@ -2745,88 +3180,79 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildStudentsTable(ResponsiveData responsive) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columnSpacing: 20,
-        headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.1)),
-        columns: const [
-          DataColumn(label: Text('Student Name', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Admission No', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Parent Name', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-        ],
-        rows: _filteredStudents.map((student) {
-          return DataRow(cells: [
-            DataCell(Text(student['name'])),
-            DataCell(Text(student['admissionNo'])),
-            DataCell(Text(student['parentName'])),
-            DataCell(Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (student['parentPhone'] != 'N/A')
-                  InkWell(
-                    onTap: () => _makePhoneCall(student['parentPhone']),
-                    child: Row(
-                      children: [
-                        Icon(Icons.phone, size: 14, color: AppColors.primary),
-                        const SizedBox(width: 4),
-                        Text(student['parentPhone'], style: const TextStyle(fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                if (student['parentEmail'] != 'N/A')
-                  Text(student['parentEmail'], style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            )),
-            DataCell(Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.message, color: AppColors.primary),
-                  onPressed: () => _startConversationWithParent(student),
-                  tooltip: 'Message Parent',
-                ),
-                IconButton(
-                  icon: Icon(Icons.visibility, color: AppColors.info),
-                  onPressed: () => _showStudentDetails(student),
-                  tooltip: 'View Details',
-                ),
-              ],
-            )),
-          ]);
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildStudentCard(Map<String, dynamic> student, ResponsiveData responsive) {
+  Widget _buildStudentCard(Map<String, dynamic> student, ResponsiveData resp) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(responsive.padding),
-      decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(14)),
+      padding: EdgeInsets.all(resp.padding),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(resp.radius),
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         children: [
           Row(
             children: [
               Container(
-                width: responsive.isMobile ? 40 : 45,
-                height: responsive.isMobile ? 40 : 45,
-                decoration: BoxDecoration(gradient: AppColors.cardGradient, shape: BoxShape.circle),
-                child: Center(child: Text(student['name'][0], style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold, color: AppColors.white))),
+                width: resp.isMobile ? 40 : 45,
+                height: resp.isMobile ? 40 : 45,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [kPrimary, kPrimaryDark],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    student['name'][0],
+                    style: TextStyle(
+                      fontSize: resp.fontSizeMedium,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(student['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: responsive.fontSizeSmall)),
-                  Text('Admission: ${student['admissionNo']}', style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
-                  Text('Parent: ${student['parentName']}', style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
-                ]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      student['name'],
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: resp.fontSizeBody,
+                        color: kTextPrimary,
+                      ),
+                    ),
+                    Text(
+                      'Admission: ${student['admissionNo']}',
+                      style: TextStyle(
+                        fontSize: resp.fontSizeSmall,
+                        color: kTextSecondary,
+                      ),
+                    ),
+                    Text(
+                      'Parent: ${student['parentName']}',
+                      style: TextStyle(
+                        fontSize: resp.fontSizeSmall,
+                        color: kTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
-                icon: Icon(Icons.message, color: AppColors.primary, size: responsive.fontSizeMedium),
+                icon: Icon(Icons.message, color: kPrimary, size: 22),
                 onPressed: () => _startConversationWithParent(student),
               ),
             ],
@@ -2835,9 +3261,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStudentInfo('Attendance', '${student['attendance']}%', Icons.calendar_today, responsive),
-              _buildStudentInfo('Average', '${student['averageScore']}%', Icons.grade, responsive),
-              _buildStudentInfo('Gender', student['gender'], Icons.person, responsive),
+              _buildStudentInfo('Attendance', '${student['attendance']}%', Icons.calendar_today, resp),
+              _buildStudentInfo('Average', '${student['averageScore']}%', Icons.grade, resp),
+              _buildStudentInfo('Gender', student['gender'], Icons.person, resp),
             ],
           ),
           const SizedBox(height: 10),
@@ -2846,18 +3272,30 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () => _showStudentDetails(student),
-                  icon: Icon(Icons.visibility, size: responsive.fontSizeSmall),
-                  label: Text('Details', style: TextStyle(fontSize: responsive.fontSizeSmall - 1)),
-                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.primary, side: const BorderSide(color: AppColors.primary)),
+                  icon: Icon(Icons.visibility, size: 18),
+                  label: Text('Details', style: TextStyle(fontSize: resp.fontSizeSmall)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kPrimary,
+                    side: const BorderSide(color: kPrimary),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: () => _startConversationWithParent(student),
-                  icon: Icon(Icons.message, size: responsive.fontSizeSmall),
-                  label: Text('Message Parent', style: TextStyle(fontSize: responsive.fontSizeSmall - 1)),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                  icon: Icon(Icons.message, size: 18),
+                  label: Text('Message Parent', style: TextStyle(fontSize: resp.fontSizeSmall)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -2867,52 +3305,100 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildStudentInfo(String label, String value, IconData icon, ResponsiveData responsive) {
+  Widget _buildStudentInfo(String label, String value, IconData icon, ResponsiveData resp) {
     return Column(
       children: [
-        Icon(icon, size: responsive.fontSizeSmall, color: AppColors.primary),
+        Icon(icon, size: 18, color: kPrimary),
         const SizedBox(height: 2),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: responsive.fontSizeSmall)),
-        Text(label, style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: resp.fontSizeBody,
+            color: kTextPrimary,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: resp.fontSizeCaption,
+            color: kTextSecondary,
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildAttendanceScreen(ResponsiveData responsive) {
+  Widget _buildAttendanceScreen(ResponsiveData resp) {
     int presentCount = _getAttendanceCountForDate(_attendanceDate);
     bool isAttendanceSaved = _isAttendanceSavedForDate(_attendanceDate);
 
     return Column(
       children: [
         Container(
-          padding: EdgeInsets.all(responsive.padding),
-          color: AppColors.white,
+          padding: EdgeInsets.all(resp.padding),
+          color: Colors.white,
           child: Column(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Take Attendance', style: TextStyle(fontSize: responsive.fontSizeLarge, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                  Text(
+                    'Take Attendance',
+                    style: TextStyle(
+                      fontSize: resp.fontSizeH2,
+                      fontWeight: FontWeight.bold,
+                      color: kPrimary,
+                    ),
+                  ),
                   if (isAttendanceSaved)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: AppColors.success.withOpacity(0.1), borderRadius: BorderRadius.circular(16)),
-                      child: const Text('Completed', style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 11)),
+                      decoration: BoxDecoration(
+                        color: kSuccess.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Text(
+                        'Completed',
+                        style: TextStyle(
+                          color: kSuccess,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                 ],
               ),
               const SizedBox(height: 12),
               Container(
-                padding: EdgeInsets.all(responsive.padding),
-                decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(12)),
+                padding: EdgeInsets.all(resp.padding),
+                decoration: BoxDecoration(
+                  color: kBackground,
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(children: [Icon(Icons.calendar_today, color: AppColors.primary), const SizedBox(width: 10), Text('Select Date')]),
                     Row(
                       children: [
-                        Text('${_attendanceDate.day}/${_attendanceDate.month}/${_attendanceDate.year}', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
-                        IconButton(icon: Icon(Icons.arrow_drop_down, color: AppColors.primary), onPressed: isAttendanceSaved ? null : _selectDate),
+                        Icon(Icons.calendar_today, color: kPrimary),
+                        const SizedBox(width: 10),
+                        const Text('Select Date'),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          '${_attendanceDate.day}/${_attendanceDate.month}/${_attendanceDate.year}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: kPrimary,
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.arrow_drop_down, color: kPrimary),
+                          onPressed: isAttendanceSaved ? null : _selectDate,
+                        ),
                       ],
                     ),
                   ],
@@ -2926,7 +3412,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       onPressed: isAttendanceSaved ? null : () => _markAllAttendance(true),
                       icon: const Icon(Icons.check_circle),
                       label: const Text('All Present'),
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kSuccess,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2935,7 +3424,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       onPressed: isAttendanceSaved ? null : () => _markAllAttendance(false),
                       icon: const Icon(Icons.cancel),
                       label: const Text('All Absent'),
-                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.error, side: const BorderSide(color: AppColors.error)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: kDanger,
+                        side: const BorderSide(color: kDanger),
+                      ),
                     ),
                   ),
                 ],
@@ -2944,40 +3436,59 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           ),
         ),
         Container(
-          padding: EdgeInsets.all(responsive.padding),
-          margin: EdgeInsets.all(responsive.padding),
-          decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(12)),
+          padding: EdgeInsets.all(resp.padding),
+          margin: EdgeInsets.all(resp.padding),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: kShadow,
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildSummaryItem('Present', presentCount.toString(), Icons.check_circle, AppColors.success, responsive),
-              _buildSummaryItem('Absent', (_students.length - presentCount).toString(), Icons.cancel, AppColors.error, responsive),
-              _buildSummaryItem('Total', _students.length.toString(), Icons.people, AppColors.primary, responsive),
+              _buildSummaryItem('Present', presentCount.toString(), Icons.check_circle, kSuccess, resp),
+              _buildSummaryItem('Absent', (_students.length - presentCount).toString(), Icons.cancel, kDanger, resp),
+              _buildSummaryItem('Total', _students.length.toString(), Icons.people, kPrimary, resp),
             ],
           ),
         ),
         Expanded(
-          child: responsive.isDesktop
-              ? _buildAttendanceTable(responsive, isAttendanceSaved)
-              : ListView.builder(
-            padding: EdgeInsets.symmetric(horizontal: responsive.padding),
+          child: ListView.builder(
+            padding: EdgeInsets.symmetric(horizontal: resp.padding),
             itemCount: _students.length,
-            itemBuilder: (context, index) => _buildAttendanceItem(_students[index], responsive, isAttendanceSaved),
+            itemBuilder: (context, index) =>
+                _buildAttendanceItem(_students[index], resp, isAttendanceSaved),
           ),
         ),
         Container(
-          padding: EdgeInsets.all(responsive.padding),
-          color: AppColors.white,
+          padding: EdgeInsets.all(resp.padding),
+          color: Colors.white,
           child: SafeArea(
             child: ElevatedButton(
               onPressed: (isAttendanceSaved || _isSavingAttendance) ? null : _saveAttendance,
               style: ElevatedButton.styleFrom(
-                backgroundColor: isAttendanceSaved ? AppColors.grey : AppColors.primary,
+                backgroundColor: isAttendanceSaved ? kBorder : kPrimary,
+                foregroundColor: isAttendanceSaved ? kTextSecondary : Colors.white,
                 minimumSize: const Size(double.infinity, 45),
               ),
               child: _isSavingAttendance
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
-                  : (isAttendanceSaved ? const Text('Attendance Completed') : const Text('Save Attendance')),
+                  ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+                  : (isAttendanceSaved
+                  ? const Text('Attendance Completed')
+                  : const Text('Save Attendance')),
             ),
           ),
         ),
@@ -2985,115 +3496,167 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildAttendanceTable(ResponsiveData responsive, bool isAttendanceSaved) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: EdgeInsets.all(responsive.padding),
-        child: DataTable(
-          columnSpacing: 20,
-          headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.1)),
-          columns: const [
-            DataColumn(label: Text('Student Name', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Admission No', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.bold))),
-          ],
-          rows: _students.map((student) {
-            String dateKey = '${_attendanceDate.year}-${_attendanceDate.month}-${_attendanceDate.day}';
-            bool isPresent = _attendanceRecords[student['id']]?[dateKey] ?? false;
-
-            return DataRow(cells: [
-              DataCell(Text(student['name'])),
-              DataCell(Text(student['admissionNo'])),
-              DataCell(
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isPresent ? AppColors.success.withOpacity(0.1) : AppColors.error.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isPresent ? 'Present' : 'Absent',
-                    style: TextStyle(color: isPresent ? AppColors.success : AppColors.error, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-              DataCell(
-                Switch(
-                  value: isPresent,
-                  onChanged: isAttendanceSaved ? null : (value) {
-                    setState(() {
-                      _attendanceRecords[student['id']]![dateKey] = value;
-                    });
-                  },
-                  activeColor: AppColors.success,
-                ),
-              ),
-            ]);
-          }).toList(),
+  Widget _buildSummaryItem(String label, String value, IconData icon, Color color, ResponsiveData resp) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 24),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: resp.fontSizeH3,
+            color: kTextPrimary,
+          ),
         ),
-      ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: resp.fontSizeCaption,
+            color: kTextSecondary,
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildSummaryItem(String label, String value, IconData icon, Color color, ResponsiveData responsive) {
-    return Column(children: [
-      Icon(icon, color: color, size: responsive.fontSizeMedium),
-      const SizedBox(height: 2),
-      Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: responsive.fontSizeMedium)),
-      Text(label, style: TextStyle(fontSize: responsive.fontSizeSmall - 1, color: AppColors.textSecondary)),
-    ]);
-  }
-
-  Widget _buildAttendanceItem(Map<String, dynamic> student, ResponsiveData responsive, bool isAttendanceSaved) {
+  Widget _buildAttendanceItem(Map<String, dynamic> student, ResponsiveData resp, bool isAttendanceSaved) {
     String dateKey = '${_attendanceDate.year}-${_attendanceDate.month}-${_attendanceDate.day}';
     bool isPresent = _attendanceRecords[student['id']]?[dateKey] ?? false;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: EdgeInsets.all(responsive.padding),
-      decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(12)),
+      padding: EdgeInsets.all(resp.padding),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(resp.radius),
+        boxShadow: [
+          BoxShadow(
+            color: kShadow,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Row(
         children: [
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(student['name'], style: TextStyle(fontWeight: FontWeight.bold)),
-              Text('Admission: ${student['admissionNo']}', style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  student['name'],
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: resp.fontSizeBody,
+                  ),
+                ),
+                Text(
+                  'Admission: ${student['admissionNo']}',
+                  style: TextStyle(
+                    fontSize: resp.fontSizeSmall,
+                    color: kTextSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (_isSavingAttendance)
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
           else
             Switch(
               value: isPresent,
-              onChanged: isAttendanceSaved ? null : (value) => setState(() { _attendanceRecords[student['id']]![dateKey] = value; }),
-              activeColor: AppColors.success,
+              onChanged: isAttendanceSaved
+                  ? null
+                  : (value) {
+                setState(() {
+                  _attendanceRecords[student['id']]![dateKey] = value;
+                });
+              },
+              activeColor: kSuccess,
             ),
           const SizedBox(width: 6),
-          Text(isPresent ? 'Present' : 'Absent', style: TextStyle(color: isPresent ? AppColors.success : AppColors.error, fontWeight: FontWeight.bold)),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: isPresent ? kSuccess.withOpacity(0.1) : kDanger.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              isPresent ? 'Present' : 'Absent',
+              style: TextStyle(
+                color: isPresent ? kSuccess : kDanger,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildResultsScreen(ResponsiveData responsive) {
+  Widget _buildResultsScreen(ResponsiveData resp) {
+    if (_isLoadingSubjects) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: kPrimary),
+            SizedBox(height: 16),
+            Text('Loading subjects...'),
+          ],
+        ),
+      );
+    }
+
     if (_subjects.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 64, color: AppColors.warning),
+            Icon(Icons.error_outline, size: 64, color: kWarning),
             const SizedBox(height: 16),
-            const Text('No subjects added yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'No subjects added yet',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: kTextPrimary,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text('Please add subjects to this classroom first', style: TextStyle(color: AppColors.textSecondary)),
+            Text(
+              'Please add subjects to this classroom first',
+              style: TextStyle(color: kTextSecondary),
+            ),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _showAddSubjectDialog,
-              icon: const Icon(Icons.library_add),
-              label: const Text('Add Subject'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _showAddSubjectDialog,
+                  icon: const Icon(Icons.library_add),
+                  label: const Text('Add Subject'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: _refreshSubjects,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kPrimary,
+                    side: const BorderSide(color: kPrimary),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -3110,209 +3673,200 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           elevation: 0,
           bottom: TabBar(
             isScrollable: true,
-            indicatorColor: AppColors.primary,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.textSecondary,
+            indicatorColor: kPrimary,
+            labelColor: kPrimary,
+            unselectedLabelColor: kTextSecondary,
             tabs: _subjects.map((subject) => Tab(text: subject['name'])).toList(),
           ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _refreshSubjects,
+              tooltip: 'Refresh Subjects',
+            ),
+          ],
         ),
         body: TabBarView(
-          children: _subjects.map((subject) => _buildSubjectScoreForm(subject, responsive)).toList(),
+          children: _subjects.map((subject) => _buildSubjectScoreForm(subject, resp)).toList(),
         ),
       ),
     );
   }
 
-  Widget _buildSubjectScoreForm(Map<String, dynamic> subject, ResponsiveData responsive) {
+  Widget _buildSubjectScoreForm(Map<String, dynamic> subject, ResponsiveData resp) {
     final subjectId = subject['id'].toString();
 
     return SingleChildScrollView(
-      padding: EdgeInsets.all(responsive.padding),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: responsive.isDesktop ? 1200 : double.infinity),
-          child: Container(
-            padding: EdgeInsets.all(responsive.padding),
-            decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(16)),
-            child: Column(
+      padding: EdgeInsets.all(resp.padding),
+      child: Container(
+        padding: EdgeInsets.all(resp.padding),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(resp.radius),
+          boxShadow: [
+            BoxShadow(
+              color: kShadow,
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: responsive.isMobile ? 50 : 60,
-                      height: responsive.isMobile ? 50 : 60,
-                      decoration: BoxDecoration(gradient: AppColors.cardGradient, shape: BoxShape.circle),
-                      child: const Icon(Icons.book, color: AppColors.white),
+                Container(
+                  width: resp.isMobile ? 50 : 60,
+                  height: resp.isMobile ? 50 : 60,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [kPrimary, kPrimaryDark],
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(subject['name'], style: TextStyle(fontSize: responsive.fontSizeLarge, fontWeight: FontWeight.bold)),
-                        Text('Enter scores for all students', style: TextStyle(color: AppColors.textSecondary, fontSize: responsive.fontSizeSmall)),
-                      ]),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Text('Student Scores', style: TextStyle(fontSize: responsive.fontSizeMedium, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                responsive.isDesktop
-                    ? _buildScoresTable(subject, responsive)
-                    : ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _students.length,
-                  itemBuilder: (context, index) {
-                    final student = _students[index];
-                    final studentId = student['id'].toString();
-                    final scores = _studentScores[studentId]?[subjectId];
-                    return _buildStudentScoreCard(student, subject, scores, responsive);
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _isSavingResults ? null : () => _saveSubjectScores(subject),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    minimumSize: Size(double.infinity, responsive.isMobile ? 45 : 50),
-                    padding: EdgeInsets.symmetric(vertical: responsive.isMobile ? 12 : 16),
+                    shape: BoxShape.circle,
                   ),
-                  child: _isSavingResults
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
-                      : const Text('Save All Scores'),
+                  child: const Icon(Icons.book, color: Colors.white),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        subject['name'],
+                        style: TextStyle(
+                          fontSize: resp.fontSizeH2,
+                          fontWeight: FontWeight.bold,
+                          color: kTextPrimary,
+                        ),
+                      ),
+                      Text(
+                        'Enter scores for all students',
+                        style: TextStyle(
+                          color: kTextSecondary,
+                          fontSize: resp.fontSizeSmall,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 20),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _students.length,
+              itemBuilder: (context, index) {
+                final student = _students[index];
+                final studentId = student['id'].toString();
+                final scores = _studentScores[studentId]?[subjectId];
+                return _buildStudentScoreCard(student, subject, scores, resp);
+              },
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _isSavingResults ? null : () => _saveSubjectScores(subject),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kPrimary,
+                foregroundColor: Colors.white,
+                minimumSize: Size(double.infinity, resp.isMobile ? 45 : 50),
+                padding: EdgeInsets.symmetric(vertical: resp.isMobile ? 12 : 16),
+              ),
+              child: _isSavingResults
+                  ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+                  : const Text('Save All Scores'),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildScoresTable(Map<String, dynamic> subject, ResponsiveData responsive) {
-    final subjectId = subject['id'].toString();
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columnSpacing: 20,
-        headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.1)),
-        columns: const [
-          DataColumn(label: Text('Student Name', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Admission No', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('CA Score (0-100)', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Exam Score (0-100)', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Total', style: TextStyle(fontWeight: FontWeight.bold))),
-        ],
-        rows: _students.map((student) {
-          final studentId = student['id'].toString();
-          final scores = _studentScores[studentId]?[subjectId];
-          int caScore = scores?['ca'] ?? 0;
-          int examScore = scores?['exam'] ?? 0;
-          int total = caScore + examScore;
-
-          TextEditingController caController = TextEditingController(text: caScore == 0 ? '' : caScore.toString());
-          TextEditingController examController = TextEditingController(text: examScore == 0 ? '' : examScore.toString());
-
-          return DataRow(cells: [
-            DataCell(Text(student['name'])),
-            DataCell(Text(student['admissionNo'])),
-            DataCell(
-              SizedBox(
-                width: 100,
-                child: TextField(
-                  controller: caController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: 'CA',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  ),
-                  onChanged: (value) {
-                    int newCa = int.tryParse(value) ?? 0;
-                    if (newCa >= 0 && newCa <= 100) {
-                      setState(() {
-                        if (_studentScores[studentId] == null) _studentScores[studentId] = {};
-                        if (_studentScores[studentId]![subjectId] == null) _studentScores[studentId]![subjectId] = {};
-                        _studentScores[studentId]![subjectId]!['ca'] = newCa;
-                      });
-                    }
-                  },
-                ),
-              ),
-            ),
-            DataCell(
-              SizedBox(
-                width: 100,
-                child: TextField(
-                  controller: examController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: 'Exam',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  ),
-                  onChanged: (value) {
-                    int newExam = int.tryParse(value) ?? 0;
-                    if (newExam >= 0 && newExam <= 100) {
-                      setState(() {
-                        if (_studentScores[studentId] == null) _studentScores[studentId] = {};
-                        if (_studentScores[studentId]![subjectId] == null) _studentScores[studentId]![subjectId] = {};
-                        _studentScores[studentId]![subjectId]!['exam'] = newExam;
-                      });
-                    }
-                  },
-                ),
-              ),
-            ),
-            DataCell(
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _getScoreColor(total).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text('$total%', style: TextStyle(color: _getScoreColor(total), fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ]);
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildStudentScoreCard(Map<String, dynamic> student, Map<String, dynamic> subject, Map<String, dynamic>? scores, ResponsiveData responsive) {
+  Widget _buildStudentScoreCard(Map<String, dynamic> student, Map<String, dynamic> subject, Map<String, dynamic>? scores, ResponsiveData resp) {
     int caScore = scores?['ca'] ?? 0;
     int examScore = scores?['exam'] ?? 0;
     int total = caScore + examScore;
     final subjectId = subject['id'].toString();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: EdgeInsets.all(responsive.padding),
-      decoration: BoxDecoration(color: AppColors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.greyLight)),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(resp.padding),
+      decoration: BoxDecoration(
+        color: kBackground,
+        borderRadius: BorderRadius.circular(resp.radius),
+        border: Border.all(color: kBorder),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: responsive.isMobile ? 40 : 45,
-                height: responsive.isMobile ? 40 : 45,
-                decoration: BoxDecoration(gradient: AppColors.cardGradient, shape: BoxShape.circle),
-                child: Center(child: Text(student['name'][0], style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.white))),
+                width: resp.isMobile ? 35 : 40,
+                height: resp.isMobile ? 35 : 40,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [kPrimary, kPrimaryDark],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    student['name'][0],
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(student['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: responsive.fontSizeSmall)),
-                  Text('Admission: ${student['admissionNo']}', style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
-                ]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      student['name'],
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: resp.fontSizeBody,
+                      ),
+                    ),
+                    Text(
+                      'Admission: ${student['admissionNo']}',
+                      style: TextStyle(
+                        fontSize: resp.fontSizeSmall,
+                        color: kTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: _getScoreColor(total).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                child: Text('Total: $total%', style: TextStyle(color: _getScoreColor(total), fontWeight: FontWeight.bold, fontSize: responsive.fontSizeSmall - 1)),
+                decoration: BoxDecoration(
+                  color: _getScoreColor(total).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'Total: $total%',
+                  style: TextStyle(
+                    color: _getScoreColor(total),
+                    fontWeight: FontWeight.bold,
+                    fontSize: resp.fontSizeSmall,
+                  ),
+                ),
               ),
             ],
           ),
@@ -3323,7 +3877,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('CA Score', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    const Text(
+                      'CA Score',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: kTextSecondary,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       keyboardType: TextInputType.number,
@@ -3340,8 +3900,11 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       },
                       decoration: InputDecoration(
                         hintText: 'CA Score (0-100)',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: kBorder),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                     ),
                   ],
@@ -3352,7 +3915,13 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Exam Score', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    const Text(
+                      'Exam Score',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: kTextSecondary,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       keyboardType: TextInputType.number,
@@ -3369,8 +3938,11 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       },
                       decoration: InputDecoration(
                         hintText: 'Exam Score (0-100)',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: kBorder),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                     ),
                   ],
@@ -3383,52 +3955,128 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
-  Widget _buildMessagesScreen(ResponsiveData responsive) {
+  Widget _buildMessagesScreen(ResponsiveData resp) {
     return const MessagesScreen();
   }
 
-  Widget _buildMoreScreen(ResponsiveData responsive) {
+  Widget _buildMoreScreen(ResponsiveData resp) {
     return SingleChildScrollView(
-      padding: EdgeInsets.all(responsive.padding),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: responsive.isDesktop ? 800 : double.infinity),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('More Options', style: TextStyle(fontSize: responsive.fontSizeLarge, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              Container(
-                decoration: BoxDecoration(gradient: AppColors.cardGradientLight, borderRadius: BorderRadius.circular(16)),
-                child: Column(
-                  children: [
-                    _buildMoreOption(Icons.assignment, 'All Assignments', 'View all assignments', _showViewAssignmentsScreen, responsive),
-                    _buildMoreOption(Icons.history, 'Attendance History', 'View records', _showAttendanceHistory, responsive),
-                    _buildMoreOption(Icons.message, 'Messages', 'View all messages', _navigateToMessages, responsive),
-                    _buildMoreOption(Icons.logout, 'Logout', 'Sign out', _showLogoutDialog, responsive, isDestructive: true),
-                  ],
-                ),
-              ),
-            ],
+      padding: EdgeInsets.all(resp.padding),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'More Options',
+            style: TextStyle(
+              fontSize: resp.fontSizeH2,
+              fontWeight: FontWeight.bold,
+              color: kTextPrimary,
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(resp.radius),
+              boxShadow: [
+                BoxShadow(
+                  color: kShadow,
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                _buildMoreOption(
+                  Icons.assignment,
+                  'All Assignments',
+                  'View all assignments',
+                  _showViewAssignmentsScreen,
+                  resp,
+                ),
+                _buildMoreOption(
+                  Icons.history,
+                  'Attendance History',
+                  'View records',
+                  _showAttendanceHistory,
+                  resp,
+                ),
+                _buildMoreOption(
+                  Icons.message,
+                  'Messages',
+                  'View all messages',
+                  _navigateToMessages,
+                  resp,
+                ),
+                _buildMoreOption(
+                  Icons.logout,
+                  'Logout',
+                  'Sign out',
+                  _showLogoutDialog,
+                  resp,
+                  isDestructive: true,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildMoreOption(IconData icon, String title, String subtitle, VoidCallback onTap, ResponsiveData responsive, {bool isDestructive = false}) {
+  Widget _buildMoreOption(
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback onTap,
+      ResponsiveData resp, {
+        bool isDestructive = false,
+      }) {
     return ListTile(
-      leading: Icon(icon, color: isDestructive ? AppColors.error : AppColors.primary, size: responsive.fontSizeMedium + 4),
-      title: Text(title, style: TextStyle(color: isDestructive ? AppColors.error : AppColors.textPrimary, fontSize: responsive.fontSizeSmall)),
-      subtitle: Text(subtitle, style: TextStyle(fontSize: responsive.fontSizeSmall - 2, color: AppColors.textSecondary)),
-      trailing: Icon(Icons.arrow_forward_ios, size: responsive.fontSizeSmall, color: AppColors.primary),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isDestructive ? kDanger.withOpacity(0.1) : kPrimary.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          icon,
+          color: isDestructive ? kDanger : kPrimary,
+          size: 22,
+        ),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: isDestructive ? kDanger : kTextPrimary,
+          fontWeight: FontWeight.w500,
+          fontSize: resp.fontSizeBody,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(
+          fontSize: resp.fontSizeSmall,
+          color: kTextSecondary,
+        ),
+      ),
+      trailing: Icon(
+        Icons.arrow_forward_ios,
+        size: 18,
+        color: isDestructive ? kDanger : kPrimary,
+      ),
       onTap: onTap,
-      contentPadding: EdgeInsets.symmetric(horizontal: responsive.padding, vertical: responsive.isMobile ? 8 : 12),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: resp.padding,
+        vertical: resp.isMobile ? 8 : 12,
+      ),
     );
   }
 }
 
-// WhatsApp-style Chat List Screen for Teachers
+// ==================== CHAT LIST SCREEN ====================
+
 class TeacherChatListScreen extends StatefulWidget {
   const TeacherChatListScreen({super.key});
 
@@ -3569,7 +4217,7 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
   void _startChat(Map<String, dynamic> student) {
     if (student['parentId'].isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Parent ID not found'), backgroundColor: AppColors.error),
+        const SnackBar(content: Text('Parent ID not found'), backgroundColor: kDanger),
       );
       return;
     }
@@ -3588,36 +4236,14 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
     );
   }
 
-  ResponsiveData _getResponsiveData(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isMobile = width < 600;
-    final isTablet = width >= 600 && width < 1200;
-    final isDesktop = width >= 1200;
-
-    return ResponsiveData(
-      isMobile: isMobile,
-      isTablet: isTablet,
-      isDesktop: isDesktop,
-      padding: isMobile ? 12.0 : (isTablet ? 20.0 : 24.0),
-      gridCrossAxisCount: isMobile ? 2 : (isTablet ? 3 : 4),
-      quickActionsCount: isMobile ? 4 : (isTablet ? 6 : 8),
-      fontSizeSmall: isMobile ? 10.0 : (isTablet ? 12.0 : 13.0),
-      fontSizeMedium: isMobile ? 14.0 : (isTablet ? 16.0 : 18.0),
-      fontSizeLarge: isMobile ? 20.0 : (isTablet ? 24.0 : 28.0),
-      fontSizeHeader: isMobile ? 22.0 : (isTablet ? 28.0 : 32.0),
-      slideshowHeight: isMobile ? 150.0 : (isTablet ? 180.0 : 200.0),
-      cardElevation: isMobile ? 2 : (isTablet ? 3 : 4),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final responsive = _getResponsiveData(context);
+    final resp = ResponsiveData(context);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Parents Chat'),
-        backgroundColor: AppColors.primary,
+        backgroundColor: kPrimary,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
@@ -3645,9 +4271,7 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
                   if (token != null) {
                     await _fetchStudents(token, value);
                   }
-                  setState(() {
-                    _isLoading = false;
-                  });
+                  setState(() => _isLoading = false);
                 }
               },
             ),
@@ -3655,19 +4279,28 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(child: CircularProgressIndicator(color: kPrimary))
           : _errorMessage != null
           ? Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.error),
+            Icon(Icons.error_outline, size: 64, color: kDanger),
             const SizedBox(height: 16),
-            Text(_errorMessage!, style: TextStyle(color: AppColors.textSecondary, fontSize: responsive.fontSizeMedium)),
+            Text(
+              _errorMessage!,
+              style: TextStyle(
+                color: kTextSecondary,
+                fontSize: resp.fontSizeBody,
+              ),
+            ),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _fetchData,
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kPrimary,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Retry'),
             ),
           ],
@@ -3676,18 +4309,17 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
           : Column(
         children: [
           Container(
-            padding: EdgeInsets.all(responsive.padding),
+            padding: EdgeInsets.all(resp.padding),
             color: Colors.white,
             child: TextField(
               controller: _searchController,
               onChanged: _filterStudents,
               decoration: InputDecoration(
                 hintText: 'Search by student or parent name...',
-                hintStyle: TextStyle(fontSize: responsive.fontSizeSmall, color: AppColors.textSecondary),
-                prefixIcon: Icon(Icons.search, color: AppColors.primary, size: responsive.fontSizeMedium),
+                prefixIcon: Icon(Icons.search, color: kPrimary),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
-                  icon: Icon(Icons.clear, size: responsive.fontSizeSmall),
+                  icon: Icon(Icons.clear, size: 18),
                   onPressed: () {
                     _searchController.clear();
                     _filterStudents('');
@@ -3699,9 +4331,9 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
                   borderSide: BorderSide.none,
                 ),
                 filled: true,
-                fillColor: AppColors.greyLight,
+                fillColor: kBackground,
                 contentPadding: EdgeInsets.symmetric(
-                  vertical: responsive.isMobile ? 10 : 12,
+                  vertical: resp.isMobile ? 10 : 12,
                   horizontal: 16,
                 ),
               ),
@@ -3709,13 +4341,13 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
           ),
           if (_isSearching)
             Container(
-              padding: EdgeInsets.symmetric(horizontal: responsive.padding, vertical: 8),
-              color: AppColors.primary.withOpacity(0.05),
+              padding: EdgeInsets.symmetric(horizontal: resp.padding, vertical: 8),
+              color: kPrimary.withOpacity(0.05),
               child: Text(
                 'Found ${_filteredStudents.length} student${_filteredStudents.length != 1 ? 's' : ''}',
                 style: TextStyle(
-                  fontSize: responsive.fontSizeSmall,
-                  color: AppColors.primary,
+                  fontSize: resp.fontSizeSmall,
+                  color: kPrimary,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -3726,20 +4358,18 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.chat_bubble_outline, size: 64, color: AppColors.grey),
+                  Icon(Icons.chat_bubble_outline, size: 64, color: kBorder),
                   const SizedBox(height: 16),
                   Text(
                     _isSearching ? 'No parents found' : 'No students in this class',
                     style: TextStyle(
-                      fontSize: responsive.fontSizeMedium,
-                      color: AppColors.textSecondary,
+                      fontSize: resp.fontSizeBody,
+                      color: kTextSecondary,
                     ),
                   ),
                 ],
               ),
             )
-                : responsive.isDesktop
-                ? _buildChatTable(responsive)
                 : ListView.builder(
               itemCount: _filteredStudents.length,
               itemBuilder: (context, index) {
@@ -3747,27 +4377,31 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
                 return InkWell(
                   onTap: () => _startChat(student),
                   child: Container(
-                    padding: EdgeInsets.all(responsive.padding),
+                    padding: EdgeInsets.all(resp.padding),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       border: Border(
-                        bottom: BorderSide(color: AppColors.greyLight, width: 0.5),
+                        bottom: BorderSide(color: kBorder, width: 0.5),
                       ),
                     ),
                     child: Row(
                       children: [
                         Container(
-                          width: responsive.isMobile ? 50 : 55,
-                          height: responsive.isMobile ? 50 : 55,
+                          width: resp.isMobile ? 50 : 55,
+                          height: resp.isMobile ? 50 : 55,
                           decoration: BoxDecoration(
-                            gradient: AppColors.cardGradient,
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [kPrimary, kPrimaryDark],
+                            ),
                             shape: BoxShape.circle,
                           ),
                           child: Center(
                             child: Text(
                               student['parentName'][0].toUpperCase(),
                               style: TextStyle(
-                                fontSize: responsive.fontSizeMedium + 4,
+                                fontSize: resp.fontSizeH2,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
                               ),
@@ -3783,28 +4417,32 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
                                 student['parentName'],
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: responsive.fontSizeSmall,
-                                  color: AppColors.textPrimary,
+                                  fontSize: resp.fontSizeBody,
+                                  color: kTextPrimary,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 'Student: ${student['name']} • Class: ${student['className']}',
                                 style: TextStyle(
-                                  fontSize: responsive.fontSizeSmall - 2,
-                                  color: AppColors.textSecondary,
+                                  fontSize: resp.fontSizeSmall,
+                                  color: kTextSecondary,
                                 ),
                               ),
                             ],
                           ),
                         ),
                         Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
+                          decoration: const BoxDecoration(
+                            color: kPrimary,
                             shape: BoxShape.circle,
                           ),
                           child: IconButton(
-                            icon: Icon(Icons.message, color: Colors.white, size: responsive.fontSizeMedium),
+                            icon: Icon(
+                              Icons.message,
+                              color: Colors.white,
+                              size: 22,
+                            ),
                             onPressed: () => _startChat(student),
                           ),
                         ),
@@ -3816,65 +4454,6 @@ class _TeacherChatListScreenState extends State<TeacherChatListScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildChatTable(ResponsiveData responsive) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: EdgeInsets.all(responsive.padding),
-        child: DataTable(
-          columnSpacing: 20,
-          headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.1)),
-          columns: const [
-            DataColumn(label: Text('Parent Name', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Student Name', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
-            DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.bold))),
-          ],
-          rows: _filteredStudents.map((student) {
-            return DataRow(cells: [
-              DataCell(Text(student['parentName'])),
-              DataCell(Text(student['name'])),
-              DataCell(Text(student['className'])),
-              DataCell(Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (student['parentPhone'] != 'N/A')
-                    InkWell(
-                      onTap: () {
-                        final phoneUri = Uri(scheme: 'tel', path: student['parentPhone']);
-                        canLaunchUrl(phoneUri).then((canLaunch) {
-                          if (canLaunch) launchUrl(phoneUri);
-                        });
-                      },
-                      child: Row(
-                        children: [
-                          Icon(Icons.phone, size: 14, color: AppColors.primary),
-                          const SizedBox(width: 4),
-                          Text(student['parentPhone'], style: const TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                  if (student['parentEmail'] != 'N/A')
-                    Text(student['parentEmail'], style: const TextStyle(fontSize: 11)),
-                ],
-              )),
-              DataCell(
-                ElevatedButton.icon(
-                  onPressed: () => _startChat(student),
-                  icon: const Icon(Icons.message),
-                  label: const Text('Chat'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                ),
-              ),
-            ]);
-          }).toList(),
-        ),
       ),
     );
   }

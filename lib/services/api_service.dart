@@ -950,7 +950,94 @@ class ApiService {
     }
   }
 
-  // In your api_service.dart
+// In your api_service.dart
+
+  /// Get subjects by school ID and classroom ID
+  Future<Map<String, dynamic>> getSubjectsByClass({
+    required String token,
+    required String schoolId,
+    required String classroomId,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse('$baseUrl/Result/GetSubjectsByClass/$schoolId/$classroomId');
+      print('📤 Fetching subjects from: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Subjects Response Status: ${response.statusCode}');
+      print('📥 Subjects Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'subjects': [],
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final subjects = responseData['data'] as List? ?? [];
+
+        // Parse subjects
+        final List<Map<String, dynamic>> parsedSubjects = subjects.map((subject) {
+          return {
+            'id': subject['subjectId'] ?? '',
+            'schoolId': subject['schoolId'] ?? '',
+            'classroomId': subject['classroomId'] ?? '',
+            'sessionTermId': subject['sessionTermId'] ?? '',
+            'name': subject['subjectName'] ?? 'Untitled',
+            'description': subject['description'] ?? 'No description',
+            'teacherId': subject['teacherId'] ?? '',
+          };
+        }).toList();
+
+        print('✅ Found ${parsedSubjects.length} subjects');
+        for (var subject in parsedSubjects) {
+          print('   📚 ${subject['name']} (${subject['id']})');
+        }
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Subjects retrieved successfully',
+          'subjects': parsedSubjects,
+          'rawData': responseData,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch subjects',
+          'subjects': [],
+        };
+      }
+    } catch (e) {
+      print('❌ Get subjects by class error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'subjects': [],
+      };
+    }
+  }
 
 // ==================== TEACHER ATTENDANCE ENDPOINTS ====================
 

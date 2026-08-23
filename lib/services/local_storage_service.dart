@@ -10,36 +10,29 @@ class LocalStorageService {
 
   LocalStorageService(this._prefs);
 
-  // Save subjects for a classroom
-  Future<void> saveSubjects(String classroomId, List<Map<String, dynamic>> subjects) async {
-    final key = '${_subjectsKey}_$classroomId';
-    final subjectsJson = subjects.map((s) => jsonEncode(s)).toList();
-    await _prefs.setStringList(key, subjectsJson);
-  }
 
-  // Get subjects for a classroom
+  /// Get subjects for a classroom
   Future<List<Map<String, dynamic>>> getSubjects(String classroomId) async {
-    final key = '${_subjectsKey}_$classroomId';
-    final subjectsJson = _prefs.getStringList(key);
-    if (subjectsJson == null) return [];
-    return subjectsJson.map((s) => jsonDecode(s) as Map<String, dynamic>).toList();
+    final key = 'subjects_$classroomId';
+    final jsonString = _prefs.getString(key);
+    if (jsonString != null) {
+      try {
+        final List<dynamic> data = jsonDecode(jsonString);
+        return data.map((item) => Map<String, dynamic>.from(item)).toList();
+      } catch (e) {
+        print('Error parsing subjects: $e');
+        return [];
+      }
+    }
+    return [];
   }
 
-  // Add a subject (saves locally and queues for sync)
-  // Add a subject (saves locally and queues for sync)
+  /// Add a subject locally
   Future<void> addSubjectLocally(String classroomId, Map<String, dynamic> subject) async {
-    // Get existing subjects
     final subjects = await getSubjects(classroomId);
-
-    // Check if subject already exists
-    final exists = subjects.any((s) => s['name'] == subject['name']);
-    if (!exists) {
-      subjects.add(subject);
-      await saveSubjects(classroomId, subjects);
-    }
-
-    // Queue for sync with API
-    await queuePendingSubject(subject);
+    subjects.add(subject);
+    await saveSubjects(classroomId, subjects);
+    print('📚 Added subject locally: ${subject['name']}');
   }
 
   // Queue pending subject for sync
@@ -80,6 +73,14 @@ class LocalStorageService {
   // Clear pending scores after successful sync
   Future<void> clearPendingScores() async {
     await _prefs.remove(_pendingScoresKey);
+  }
+
+  /// Save subjects for a classroom
+  Future<void> saveSubjects(String classroomId, List<Map<String, dynamic>> subjects) async {
+    final key = 'subjects_$classroomId';
+    final jsonString = jsonEncode(subjects);
+    await _prefs.setString(key, jsonString);
+    print('💾 Saved ${subjects.length} subjects for classroom $classroomId');
   }
 
   // Sync pending subjects with API
