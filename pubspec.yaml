@@ -35,12 +35,13 @@ dependencies:
   http: ^1.2.0
     # QR Code Scanner
   mobile_scanner: ^4.0.0
-
-    # Location
+  image_picker: ^1.0.4
+  path_provider: ^2.1.1
   geolocator: ^10.1.0
-
+  file_selector: ^1.0.1
     # Device Info
   device_info_plus: ^9.1.1
+  
 
     # Network Info
   network_info_plus: ^7.0.0
@@ -89,6 +90,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -1,4 +1,4 @@
-// Update your fee_provider.dart
+// services/fee_provider.dart
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -26,12 +26,12 @@ class FeeProvider extends ChangeNotifier {
   String? paymentGateway;
   bool paymentSuccess = false;
 
-  /// Calculate discounted fee
-  // In fee_provider.dart
+  // ==================== OTHER FEES ====================
+  List<Map<String, dynamic>> otherFees = [];
+  double totalOtherFees = 0.0;
+  bool isFetchingOtherFees = false;
 
   /// Calculate discounted fee
-  // In fee_provider.dart, make sure you're also fetching the discount
-
   Future<bool> calculateDiscountedFee({
     required String token,
     required String studentId,
@@ -132,6 +132,7 @@ class FeeProvider extends ChangeNotifier {
       return false;
     }
   }
+
   /// Initiate payment
   Future<bool> initiatePayment({
     required String token,
@@ -188,17 +189,111 @@ class FeeProvider extends ChangeNotifier {
     }
   }
 
+  // ==================== OTHER FEES METHODS ====================
+
+  /// Fetch other fees for a classroom
+  Future<bool> fetchOtherFees({
+    required String token,
+    required String classroomId,
+    bool activeOnly = true,
+  }) async {
+    isFetchingOtherFees = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiService.getOtherFeesByClassroom(
+        token: token,
+        classroomId: classroomId,
+        activeOnly: activeOnly,
+      );
+
+      if (result['success']) {
+        otherFees = List<Map<String, dynamic>>.from(result['fees']);
+        totalOtherFees = result['totalAmount'] ?? 0.0;
+        errorMessage = null;
+
+        print('✅ Fetched ${otherFees.length} other fees');
+        print('💰 Total amount: ₦$totalOtherFees');
+
+        isFetchingOtherFees = false;
+        notifyListeners();
+        return true;
+      } else {
+        errorMessage = result['message'] ?? 'Failed to fetch fees';
+        otherFees = [];
+        totalOtherFees = 0.0;
+        isFetchingOtherFees = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      errorMessage = 'Unexpected error: $e';
+      otherFees = [];
+      totalOtherFees = 0.0;
+      isFetchingOtherFees = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Get total mandatory fees
+  double getTotalMandatoryFees() {
+    return otherFees
+        .where((fee) => fee['isMandatory'] == true)
+        .fold(0.0, (sum, fee) => sum + (fee['amount'] as double));
+  }
+
+  /// Get total optional fees
+  double getTotalOptionalFees() {
+    return otherFees
+        .where((fee) => fee['isMandatory'] == false)
+        .fold(0.0, (sum, fee) => sum + (fee['amount'] as double));
+  }
+
+  /// Get mandatory fees only
+  List<Map<String, dynamic>> getMandatoryFees() {
+    return otherFees.where((fee) => fee['isMandatory'] == true).toList();
+  }
+
+  /// Get optional fees only
+  List<Map<String, dynamic>> getOptionalFees() {
+    return otherFees.where((fee) => fee['isMandatory'] == false).toList();
+  }
+
+  /// Get fee by ID
+  Map<String, dynamic>? getFeeById(String feeId) {
+    try {
+      return otherFees.firstWhere((fee) => fee['id'] == feeId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Check if there are any mandatory fees
+  bool get hasMandatoryFees {
+    return getMandatoryFees().isNotEmpty;
+  }
+
+  /// Check if there are any optional fees
+  bool get hasOptionalFees {
+    return getOptionalFees().isNotEmpty;
+  }
+
+  // ==================== EXISTING METHODS ====================
+
   /// Mark payment as successful
   void setPaymentSuccess(bool success) {
     paymentSuccess = success;
     notifyListeners();
   }
 
-  /// Reset state
+  /// Reset all state
   void reset() {
     isLoading = false;
     isCalculatingDiscount = false;
     isProcessingPayment = false;
+    isFetchingOtherFees = false;
     errorMessage = null;
     originalFee = 0;
     discountedFee = 0;
@@ -209,6 +304,16 @@ class FeeProvider extends ChangeNotifier {
     paymentReference = null;
     paymentGateway = null;
     paymentSuccess = false;
+    otherFees = [];
+    totalOtherFees = 0.0;
+    notifyListeners();
+  }
+
+  /// Reset only other fees
+  void resetOtherFees() {
+    otherFees = [];
+    totalOtherFees = 0.0;
+    isFetchingOtherFees = false;
     notifyListeners();
   }
 
@@ -226,5 +331,16 @@ class FeeProvider extends ChangeNotifier {
   /// Get formatted discounted fee
   String getDiscountedFeeText() {
     return '₦${discountedFee.toStringAsFixed(2)}';
+  }
+
+  /// Get formatted total other fees
+  String getTotalOtherFeesText() {
+    return '₦${totalOtherFees.toStringAsFixed(2)}';
+  }
+
+  /// Get summary of other fees
+  String getOtherFeesSummary() {
+    if (otherFees.isEmpty) return 'No additional fees';
+    return '${otherFees.length} fee${otherFees.length > 1 ? 's' : ''} (Total: ₦${totalOtherFees.toStringAsFixed(2)})';
   }
 }

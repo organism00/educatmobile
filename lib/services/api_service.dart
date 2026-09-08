@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:http/http.dart' as http;
+import '../models/loan_application.dart';
 import '../models/user_model.dart';
 import '../utils/jwt_decoder.dart';
 
@@ -885,6 +887,663 @@ class ApiService {
     }
   }
 
+
+  // In your api_service.dart
+
+  /// Get other fees by classroom ID
+  Future<Map<String, dynamic>> getOtherFeesByClassroom({
+    required String token,
+    required String classroomId,
+    bool activeOnly = true,
+  }) async {
+    try {
+      // Check if token is expired
+      if (JwtDecoder.isTokenExpired(token)) {
+        return {
+          'success': false,
+          'message': 'Session expired. Please login again.',
+          'expired': true,
+        };
+      }
+
+      final url = Uri.parse('$baseUrl/OtherFee/GetOtherFeesByClassroom/$classroomId?activeOnly=$activeOnly');
+      print('📤 Fetching other fees from: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Other Fees Response Status: ${response.statusCode}');
+      print('📥 Other Fees Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'fees': [],
+          'totalAmount': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if (httpStatus == 200 && isSuccess) {
+        final fees = responseData['data'] as List? ?? [];
+
+        // Parse fees
+        final List<Map<String, dynamic>> parsedFees = fees.map((fee) {
+          return {
+            'id': fee['otherFeeId'] ?? '',
+            'schoolId': fee['schoolId'] ?? '',
+            'classroomId': fee['classroomId'] ?? '',
+            'name': fee['feeName'] ?? 'Untitled Fee',
+            'amount': (fee['amount'] ?? 0).toDouble(),
+            'isMandatory': fee['isMandatory'] ?? true,
+            'description': fee['description'] ?? '',
+            'sessionId': fee['sessionId'] ?? '',
+            'termId': fee['termId'] ?? '',
+            'isActive': fee['isActive'] ?? true,
+            'createdAt': fee['createdAt'],
+          };
+        }).toList();
+
+        // Calculate total amount
+        double totalAmount = parsedFees.fold(0.0, (sum, fee) => sum + (fee['amount'] as double));
+
+        print('✅ Found ${parsedFees.length} other fees');
+        print('💰 Total amount: ₦$totalAmount');
+        for (var fee in parsedFees) {
+          print('   📝 ${fee['name']}: ₦${fee['amount']} (${fee['isMandatory'] ? 'Mandatory' : 'Optional'})');
+        }
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Fees retrieved successfully',
+          'fees': parsedFees,
+          'totalAmount': totalAmount,
+          'rawData': responseData,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch fees',
+          'fees': [],
+          'totalAmount': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get other fees error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'fees': [],
+        'totalAmount': 0.0,
+      };
+    }
+  }
+
+  // Add these methods to your ApiService class
+
+// ==================== LOAN & BVN ENDPOINTS ====================
+  /// Upload Credit Assessment (Bank Statement)
+  Future<Map<String, dynamic>> uploadCreditAssessment({
+    required String token,
+    required String guardianId,
+    required String edubanclSchoolId,
+    required String bankAccountNumber,
+    required String bankCode,
+    required String bankName,
+    required String incomeSource,
+    required int tenureMonths,
+    required File file,
+    String? documentPassword,
+    String? employerName,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/credit-assessment/upload');
+      print('📤 Uploading credit assessment at: $url');
+
+      // Create multipart request
+      var request = http.MultipartRequest('POST', url);
+
+      // Add headers
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      });
+
+      // Add fields
+      request.fields['guardianId'] = guardianId;
+      request.fields['EdubanclSchoolId'] = edubanclSchoolId;
+      request.fields['bankAccountNumber'] = bankAccountNumber;
+      request.fields['bankCode'] = bankCode;
+      request.fields['bankName'] = bankName;
+      request.fields['incomeSource'] = incomeSource;
+      request.fields['tenureMonths'] = tenureMonths.toString();
+
+      if (documentPassword != null && documentPassword.isNotEmpty) {
+        request.fields['documentPassword'] = documentPassword;
+      }
+
+      if (employerName != null && employerName.isNotEmpty) {
+        request.fields['employerName'] = employerName;
+      }
+
+      // Add file
+      final fileBytes = await file.readAsBytes();
+      final fileName = file.path.split('/').last;
+      final extension = fileName.split('.').last.toLowerCase();
+
+      String mimeType;
+      switch (extension) {
+        case 'pdf':
+          mimeType = 'application/pdf';
+          break;
+        case 'jpg':
+        case 'jpeg':
+          mimeType = 'image/jpeg';
+          break;
+        case 'png':
+          mimeType = 'image/png';
+          break;
+        default:
+          mimeType = 'application/octet-stream';
+      }
+
+      request.files.add(http.MultipartFile.fromBytes(
+        'file',
+        fileBytes,
+        filename: fileName,
+        contentType: http.MediaType.parse(mimeType),
+      ));
+
+      print('📤 Uploading file: $fileName ($mimeType)');
+      print('📤 Fields: ${request.fields}');
+
+      final response = await request.send().timeout(timeout);
+      final responseBody = await response.stream.bytesToString();
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response: $responseBody');
+
+      if (responseBody.isEmpty) {
+        return {'success': false, 'message': 'Empty response from server'};
+      }
+
+      final responseData = jsonDecode(responseBody);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Credit assessment uploaded',
+          'applicationId': responseData['data']?['id'],
+          'status': responseData['data']?['status'],
+          'statusLabel': responseData['data']?['statusLabel'],
+          'creditAssessmentId': responseData['data']?['creditAssessmentId'],
+          'data': responseData['data'],
+        };
+      } else {
+        String errorMessage = responseData['responseMessage'] ?? 'Failed to upload credit assessment';
+
+        // Check for validation errors
+        if (responseData['errors'] != null) {
+          final errors = responseData['errors'] as Map<String, dynamic>;
+          final errorMessages = <String>[];
+          errors.forEach((key, value) {
+            if (value is List) {
+              errorMessages.add('$key: ${value.join(', ')}');
+            } else {
+              errorMessages.add('$key: $value');
+            }
+          });
+          errorMessage = errorMessages.join('; ');
+        }
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to upload credit assessment',
+          'responseCode': responseData['responseCode'],
+          'statusCode': response.statusCode,
+        };
+      }
+    } catch (e) {
+      print('❌ Upload credit assessment error: $e');
+      return {'success': false, 'message': 'Network error: ${e.toString()}'};
+    }
+  }
+
+
+  /// Poll Credit Assessment Status
+  Future<Map<String, dynamic>> getCreditAssessment({
+    required String token,
+    required String applicationId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/credit-assessment/$applicationId');
+      print('📤 Getting credit assessment at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {'success': false, 'message': 'Empty response from server'};
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final bool isPending = responseData['isPending'] ?? false;
+        final Map<String, dynamic>? data = responseData['data'] as Map<String, dynamic>?;
+
+        return {
+          'success': true,
+          'isPending': isPending,
+          'data': data,
+          'id': data?['id'],
+          'status': data?['status'],
+          'statusLabel': data?['statusLabel'],
+          'eligibleAmount': data?['eligibleAmount'],
+          'creditAssessmentId': data?['creditAssessmentId'],
+          'message': data?['edubanclStatusMessage'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to get credit assessment',
+          'statusCode': response.statusCode,
+        };
+      }
+    } catch (e) {
+      print('❌ Get credit assessment error: $e');
+      return {'success': false, 'message': 'Network error: ${e.toString()}'};
+    }
+  }
+
+  /// Submit Loan Application
+  Future<Map<String, dynamic>> submitLoanApplication({
+    required String token,
+    required String guardianId,
+    required String studentId,
+    required String internalSchoolId,
+    required String edubanc1SchoolId,
+    required String creditAssessmentId,
+    required String loanType,
+    required String term,
+    required String academicSession,
+    required String tenure,
+    required double requestedAmount,
+    required Map<String, dynamic> nextOfKin,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/loans/apply');
+      print('📤 Submitting loan application at: $url');
+
+      final requestBody = {
+        'guardianId': guardianId,
+        'studentId': studentId,
+        'internalSchoolId': internalSchoolId,
+        'edubanc1SchoolId': edubanc1SchoolId,
+        'creditAssessmentId': creditAssessmentId,
+        'loanType': loanType,
+        'term': term,
+        'academicSession': academicSession,
+        'tenure': tenure,
+        'requestedAmount': requestedAmount,
+        'nextOfKin': nextOfKin,
+      };
+
+      print('📤 Request Body: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      // Check if request was successful
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Loan application submitted successfully',
+          'data': responseData['data'],
+          'applicationId': responseData['data']?['id'],
+          'status': responseData['data']?['status'],
+          'statusLabel': responseData['data']?['statusLabel'],
+        };
+      } else {
+        // Handle validation errors
+        String errorMessage = responseData['responseMessage'] ?? 'Failed to submit loan application';
+
+        // Check for validation errors
+        if (responseData['errors'] != null) {
+          final errors = responseData['errors'] as Map<String, dynamic>;
+          final errorMessages = <String>[];
+          errors.forEach((key, value) {
+            if (value is List) {
+              errorMessages.add('$key: ${value.join(', ')}');
+            } else {
+              errorMessages.add('$key: $value');
+            }
+          });
+          errorMessage = errorMessages.join('; ');
+        }
+
+        return {
+          'success': false,
+          'message': errorMessage,
+          'responseCode': responseData['responseCode'],
+          'errors': responseData['errors'],
+        };
+      }
+    } catch (e) {
+      print('❌ Submit loan application error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Get Guardian Loan Applications
+  Future<Map<String, dynamic>> getGuardianApplications({
+    required String token,
+    required String guardianId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/applications/guardian/$guardianId');
+      print('📤 Fetching guardian applications at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'applications': [],
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final List<dynamic> data = responseData['data'] ?? [];
+        final List<LoanApplication> applications = data
+            .map((item) => LoanApplication.fromJson(item))
+            .toList();
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Applications retrieved',
+          'applications': applications,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch applications',
+          'applications': [],
+        };
+      }
+    } catch (e) {
+      print('❌ Get guardian applications error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'applications': [],
+      };
+    }
+  }
+
+  /// Initiate BVN verification
+  Future<Map<String, dynamic>> initiateBvnVerification({
+    required String token,  // Add this parameter
+    required String guardianId,
+    required String edubanclSchoolId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/bvn/initiate');
+      print('📤 Initiating BVN verification at: $url');
+
+      final requestBody = {
+        'guardianId': guardianId,
+        'edubanclSchoolId': edubanclSchoolId,
+      };
+
+      print('📤 Request Body: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',  // ADD THIS
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 BVN Initiate Response Status: ${response.statusCode}');
+      print('📥 BVN Initiate Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if ((httpStatus == 200 || httpStatus == 201) && isSuccess) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'BVN verification initiated',
+          'data': responseData['data'],
+          'sessionId': responseData['data']?['sessionId'],
+          'methods': responseData['data']?['methods'] ?? [],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to initiate BVN verification',
+          'data': responseData['data'],
+          'statusCode': httpStatus,
+        };
+      }
+    } catch (e) {
+      print('❌ Initiate BVN verification error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Verify BVN OTP
+  /// Verify BVN method (send OTP to phone)
+  Future<Map<String, dynamic>> verifyBvnMethod({
+    required String token,
+    required String guardianId,
+    required String edubanclSchoolId,
+    required String sessionId,
+    required String method,
+    required String phoneNumber,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/bvn/verify-method');
+      print('📤 Verifying BVN method at: $url');
+
+      final requestBody = {
+        'guardianId': guardianId,
+        'edubanclSchoolId': edubanclSchoolId,
+        'sessionId': sessionId,
+        'method': method,
+        'phoneNumber': phoneNumber,
+      };
+
+      print('📤 Request Body: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 BVN Method Verify Response Status: ${response.statusCode}');
+      print('📥 BVN Method Verify Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if ((httpStatus == 200 || httpStatus == 201) && isSuccess) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'OTP sent successfully',
+          'data': responseData['data'],
+          'responseMessage': responseData['responseMessage'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to verify method',
+          'data': responseData['data'],
+          'statusCode': httpStatus,
+        };
+      }
+    } catch (e) {
+      print('❌ Verify BVN method error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Confirm BVN OTP (Final verification step)
+  Future<Map<String, dynamic>> confirmBvnOtp({
+    required String token,
+    required String guardianId,
+    required String edubanclSchoolId,
+    required String sessionId,
+    required String otp,
+    required String bvn,
+    required String bvnPhoneNumber,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/bvn/confirm');
+      print('📤 Confirming BVN OTP at: $url');
+
+      final requestBody = {
+        'guardianId': guardianId,
+        'edubanclSchoolId': edubanclSchoolId,
+        'sessionId': sessionId,
+        'otp': otp,
+        'bvn': bvn,
+        'bvnPhoneNumber': bvnPhoneNumber,
+      };
+
+      print('📤 Request Body: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 BVN Confirm Response Status: ${response.statusCode}');
+      print('📥 BVN Confirm Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+      final int httpStatus = response.statusCode;
+      final bool isSuccess = responseData['status'] == true || responseData['status'] == 'true';
+
+      if ((httpStatus == 200 || httpStatus == 201) && isSuccess) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'BVN verified successfully',
+          'data': responseData['data'],
+          'responseMessage': responseData['responseMessage'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to verify BVN',
+          'data': responseData['data'],
+          'statusCode': httpStatus,
+        };
+      }
+    } catch (e) {
+      print('❌ Confirm BVN OTP error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
 
 // Save Teacher Results
   Future<Map<String, dynamic>> saveTeacherResults({
