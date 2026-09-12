@@ -590,6 +590,536 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     );
   }
 
+  // ==================== PUPIL DETAILS DIALOG ====================
+
+  void _showPupilDetails(Map<String, dynamic> pupil) {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final bool hasPhone = pupil['teacherPhone'] != null &&
+        pupil['teacherPhone'].toString().isNotEmpty &&
+        pupil['teacherPhone'] != 'N/A' &&
+        pupil['teacherPhone'] != 'Not available';
+
+    double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        titlePadding: const EdgeInsets.all(16),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                pupil['name'],
+                style: const TextStyle(color: AppColors.primary, fontSize: 16),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: Container(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Student Information',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow('Admission No', pupil['admissionNo'] ?? 'N/A'),
+                    _buildInfoRow('Class', pupil['class'] ?? 'N/A'),
+                    _buildInfoRow(
+                      'Fee',
+                      feeAmount > 0 ? '₦${feeAmount.toStringAsFixed(2)}' : 'Not Set',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.info.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Teacher Information',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow('Name', pupil['teacherName'] ?? 'N/A'),
+                    _buildInfoRow('Email', pupil['teacherEmail'] ?? 'N/A'),
+                    _buildInfoRow('Phone', pupil['teacherPhone'] ?? 'N/A'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          if (hasPhone)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _makePhoneCall(pupil['teacherPhone']);
+              },
+              icon: const Icon(Icons.phone, size: 18),
+              label: const Text('Call'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.success,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _startConversationWithTeacher(pupil);
+            },
+            icon: const Icon(Icons.message, size: 18),
+            label: const Text('Message'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== FUND WALLET DIALOG ====================
+
+  void _showFundWalletDialog() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Fund Wallet', style: TextStyle(color: AppColors.primary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Send payment to:'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: AppColors.cardGradientLight,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildInfoRow('Account Name', _accountName.isNotEmpty ? _accountName : 'N/A'),
+                  _buildInfoRow('Account Number', _accountNumber.isNotEmpty ? _accountNumber : 'N/A'),
+                  _buildInfoRow('Bank Name', _bankName.isNotEmpty ? _bankName : 'N/A'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Make a transfer to the above account. Your wallet will be credited automatically.',
+              style: TextStyle(fontSize: isSmallScreen ? 11 : 12, color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              String accountDetails = '''
+Account Name: ${_accountName.isNotEmpty ? _accountName : 'N/A'}
+Account Number: ${_accountNumber.isNotEmpty ? _accountNumber : 'N/A'}
+Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
+''';
+              Clipboard.setData(ClipboardData(text: accountDetails));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Account details copied!'),
+                  backgroundColor: AppColors.success,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            child: const Text('Copy Details'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showWithdrawDialog() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final amountController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Withdraw Funds', style: TextStyle(color: AppColors.primary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Available Balance: ₦${_walletBalance.toStringAsFixed(2)}',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: isSmallScreen ? 13 : 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Amount',
+                prefixText: '₦',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Funds will be transferred to your registered bank account.',
+              style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: AppColors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final amount = double.tryParse(amountController.text) ?? 0;
+              if (amount > 0 && amount <= _walletBalance) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Withdrawal of ₦${amount.toStringAsFixed(2)} initiated!'),
+                    backgroundColor: AppColors.success,
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Invalid amount or insufficient balance'),
+                    backgroundColor: AppColors.error,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Withdraw'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== NEWS DETAILS ====================
+
+  void _showNewsDetails(Map<String, dynamic> news) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          news['title'],
+          style: const TextStyle(color: AppColors.primary, fontSize: 16),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Date: ${news['date']}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                news['content'] ?? 'No content available',
+                style: const TextStyle(fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAllNews() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.8,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          child: Column(
+            children: [
+              const Text(
+                'All News',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _news.isEmpty
+                    ? const Center(child: Text('No news available'))
+                    : ListView.builder(
+                  controller: scrollController,
+                  itemCount: _news.length,
+                  itemBuilder: (context, index) {
+                    final item = _news[index];
+                    return Card(
+                      child: ListTile(
+                        dense: true,
+                        title: Text(item['title'], style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(item['date'], style: const TextStyle(fontSize: 11)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showNewsDetails(item);
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAllAssignments() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'All Assignments',
+                    style: TextStyle(
+                      fontSize: isSmallScreen ? 20 : 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _isLoadingAssignments
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    : _assignments.isEmpty
+                    ? const Center(child: Text('No assignments yet'))
+                    : ListView.builder(
+                  controller: scrollController,
+                  itemCount: _assignments.length,
+                  itemBuilder: (context, index) {
+                    return _buildAssignmentItem(_assignments[index]);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAllLoanApplications() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'All Loan Applications',
+                    style: TextStyle(
+                      fontSize: isSmallScreen ? 20 : 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _loanProvider.isLoading
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    : _loanProvider.applications.isEmpty
+                    ? const Center(child: Text('No loan applications yet'))
+                    : ListView.builder(
+                  controller: scrollController,
+                  itemCount: _loanProvider.applications.length,
+                  itemBuilder: (context, index) {
+                    final application = _loanProvider.applications[index];
+                    return _buildLoanApplicationTile(application);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLoanDetails() {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Loan Details',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    _buildInfoRow('Total Loan Amount', '₦${_loanBalance.toStringAsFixed(2)}'),
+                    _buildInfoRow('Loan Balance', '₦${_loanBalance.toStringAsFixed(2)}'),
+                    _buildInfoRow('Active Loans', '$_activeLoans'),
+                    const Divider(height: 24),
+                    const Text(
+                      'Loan Applications',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_loanProvider.applications.isEmpty)
+                      const Text('No loan applications yet')
+                    else
+                      ..._loanProvider.applications.map((app) => ListTile(
+                        dense: true,
+                        title: Text(app.statusDisplay, style: const TextStyle(fontSize: 13)),
+                        subtitle: Text('ID: ${app.id.length > 8 ? app.id.substring(0, 8) : app.id}', style: const TextStyle(fontSize: 11)),
+                        trailing: Icon(app.statusIcon, color: app.statusColor),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _navigateToLoanApplication(app);
+                        },
+                      )),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.white,
+                  ),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ==================== OTHER FEES METHODS ====================
 
   void _showOtherFeesScreen() {
@@ -1525,13 +2055,13 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const LoanRequestScreen()),
-    );
+    ).then((_) => _fetchLoanApplications(
+      Provider.of<AuthProvider>(context, listen: false).token ?? '',
+    ));
   }
 
   void _navigateToLoanApplication(LoanApplication application) {
-    // Navigate based on application status
     if (application.status == 2 || application.status == 3) {
-      // Assessment pending - show status screen
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -1542,7 +2072,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
         ),
       );
     } else if (application.status == 4) {
-      // Assessment complete - show loan application
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -1553,7 +2082,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
         ),
       );
     } else {
-      // Show details dialog
       _showApplicationDetails(application);
     }
   }
@@ -2176,16 +2704,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     );
   }
 
-  void _showComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Feature coming soon!'),
-        backgroundColor: AppColors.info,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
   void _showLogoutDialog() {
     showDialog(
       context: context,
@@ -2381,7 +2899,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
           const SizedBox(height: 8),
           _buildAssignmentsPreview(),
           const SizedBox(height: 12),
-          _buildSectionTitle('News & Events', null),
+          _buildSectionTitle('News & Events', _news.isNotEmpty ? 'View All' : null),
           const SizedBox(height: 8),
           _buildNewsAndEvents(),
           const SizedBox(height: 16),
@@ -2389,8 +2907,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
       ),
     );
   }
-
-  // ==================== LOAN APPLICATIONS SECTION ====================
 
   Widget _buildLoanApplicationsSection() {
     final activeApps = _loanProvider.activeApplications;
@@ -2483,7 +2999,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
         ),
       ),
       title: Text(
-        'Application #${application.id.substring(0, 8)}',
+        'Application #${application.id.length > 8 ? application.id.substring(0, 8) : application.id}',
         style: TextStyle(
           fontWeight: FontWeight.w600,
           fontSize: _resp.smallTextSize,
@@ -2755,7 +3271,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: _showComingSoon,
+                  onPressed: _showFundWalletDialog,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.white,
                     foregroundColor: AppColors.primary,
@@ -2876,7 +3392,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _showComingSoon,
+                  onPressed: _showLoanDetails,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.white,
                     side: const BorderSide(color: AppColors.white),
@@ -2896,7 +3412,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
               const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: _loanBalance > 0 ? _showComingSoon : null,
+                  onPressed: _loanBalance > 0 ? _showWithdrawDialog : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.white,
                     foregroundColor: AppColors.primary,
@@ -3007,12 +3523,13 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
             GestureDetector(
               onTap: () {
                 if (title == 'Assignments') {
-                  _showComingSoon();
+                  _showAllAssignments();
                 } else if (title == 'My Children') {
                   setState(() => _selectedIndex = 1);
+                } else if (title == 'News & Events') {
+                  _showAllNews();
                 } else if (title == 'Loan Applications') {
-                  // Show all applications - could navigate to a list screen
-                  _showComingSoon();
+                  _showAllLoanApplications();
                 }
               },
               child: Text(
@@ -3219,7 +3736,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
               color: AppColors.primary,
               size: _resp.smallIconSize,
             ),
-            onPressed: _showComingSoon,
+            onPressed: () => _showPupilDetails(pupil),
             tooltip: 'Details',
           ),
         ],
@@ -3401,7 +3918,54 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
           ),
         ),
       ),
-      onTap: _showComingSoon,
+      onTap: () => _showAssignmentDetails(assignment),
+    );
+  }
+
+  void _showAssignmentDetails(Map<String, dynamic> assignment) {
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final dueDate = DateTime.tryParse(assignment['dueDate'] ?? '');
+    final isOverdue = dueDate != null && dueDate.isBefore(DateTime.now());
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          assignment['title'] ?? 'Assignment Details',
+          style: const TextStyle(color: AppColors.primary, fontSize: 16),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Description:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(assignment['description'] ?? 'No description', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              const Text('Due Date:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(
+                _formatDate(assignment['dueDate']),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isOverdue ? AppColors.error : AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Class:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(assignment['className'] ?? 'N/A', style: TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3489,7 +4053,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
               size: _resp.smallIconSize,
               color: AppColors.primary,
             ),
-            onTap: _showComingSoon,
+            onTap: () => _showNewsDetails(item),
           );
         },
       ),
@@ -3735,7 +4299,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
                   color: AppColors.primary,
                   size: _resp.smallIconSize,
                 ),
-                onPressed: _showComingSoon,
+                onPressed: () => _showPupilDetails(pupil),
                 tooltip: 'Details',
               ),
               IconButton(
@@ -3979,7 +4543,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
                   children: [
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: _showComingSoon,
+                        onPressed: _showFundWalletDialog,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.white,
                           foregroundColor: AppColors.primary,
@@ -3996,7 +4560,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: _showComingSoon,
+                        onPressed: _showWithdrawDialog,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.white,
                           side: const BorderSide(color: AppColors.white),
@@ -4218,12 +4782,31 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
               children: [
                 _buildMoreOption(Icons.payments, 'School Fees', 'Pay school fees', _showFeesScreen),
                 _buildMoreOption(Icons.receipt_long, 'Other Fees', 'View additional fees', _showOtherFeesScreen),
-                _buildMoreOption(Icons.assignment, 'All Assignments', 'View all assignments', _showComingSoon),
+                _buildMoreOption(Icons.assignment, 'All Assignments', 'View all assignments', _showAllAssignments),
                 _buildMoreOption(Icons.discount_rounded, 'Student Discounts', 'View all student discounts', _showDiscountsScreen),
                 _buildMoreOption(Icons.message, 'Messages', 'View all messages', _navigateToMessages),
-                _buildMoreOption(Icons.newspaper, 'All News', 'View all news', _showComingSoon),
+                _buildMoreOption(Icons.newspaper, 'All News', 'View all news', _showAllNews),
                 _buildMoreOption(Icons.credit_card, 'Request Loan', 'Apply for a loan', _navigateToLoanRequest),
-                _buildMoreOption(Icons.help, 'Help & Support', 'Get assistance', _showComingSoon),
+                _buildMoreOption(Icons.help, 'Help & Support', 'Get assistance', () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Help & Support', style: TextStyle(color: AppColors.primary)),
+                      content: const Text(
+                        'For assistance, please contact:\n\n'
+                            '📧 support@educatmobile.com\n'
+                            '📞 +234 800 000 0000\n\n'
+                            'Our team is available 24/7 to help you.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Close'),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
                 _buildMoreOption(Icons.logout, 'Logout', 'Sign out', _showLogoutDialog, isDestructive: true),
               ],
             ),

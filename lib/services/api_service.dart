@@ -1180,7 +1180,7 @@ class ApiService {
     required String guardianId,
     required String studentId,
     required String internalSchoolId,
-    required String edubanc1SchoolId,
+    required String edubanclSchoolId,
     required String creditAssessmentId,
     required String loanType,
     required String term,
@@ -1197,7 +1197,7 @@ class ApiService {
         'guardianId': guardianId,
         'studentId': studentId,
         'internalSchoolId': internalSchoolId,
-        'edubanc1SchoolId': edubanc1SchoolId,
+        'edubanclSchoolId': edubanclSchoolId,
         'creditAssessmentId': creditAssessmentId,
         'loanType': loanType,
         'term': term,
@@ -1268,6 +1268,61 @@ class ApiService {
       }
     } catch (e) {
       print('❌ Submit loan application error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Accept Loan Terms (Step 5)
+  Future<Map<String, dynamic>> acceptLoanTerms({
+    required String token,
+    required String applicationId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/loans/$applicationId/accept-terms');
+      print('📤 Accepting loan terms at: $url');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Terms accepted successfully',
+          'data': responseData['data'],
+          'applicationId': responseData['data']?['id'],
+          'status': responseData['data']?['status'],
+          'statusLabel': responseData['data']?['statusLabel'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to accept terms',
+          'responseCode': responseData['responseCode'],
+        };
+      }
+    } catch (e) {
+      print('❌ Accept loan terms error: $e');
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',

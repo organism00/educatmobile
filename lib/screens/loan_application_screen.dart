@@ -547,7 +547,7 @@ class _LoanApplicationScreenState extends State<LoanApplicationScreen> {
         guardianId: user.id,
         studentId: _studentIdController.text.trim(),
         internalSchoolId: user.schoolId,
-        edubanc1SchoolId: user.schoolId,
+        edubanclSchoolId: user.schoolId,
         creditAssessmentId: widget.creditAssessmentId,
         loanType: _selectedLoanType!,
         term: _selectedTerm!,
