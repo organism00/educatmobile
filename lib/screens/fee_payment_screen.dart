@@ -17,6 +17,12 @@ class FeePaymentScreen extends StatefulWidget {
   final double originalFee;
   final String sessionId;
 
+  // 🆕 Optional: specific fee details (when paying one fee at a time)
+  final String? feeId;
+  final String? feeType;   // 'ClassFee' or 'OtherFee'
+  final String? feeName;   // e.g. "Uniform", "Jss 1"
+  final String? termName;  // e.g. "First Term"
+
   const FeePaymentScreen({
     Key? key,
     required this.studentId,
@@ -25,6 +31,10 @@ class FeePaymentScreen extends StatefulWidget {
     required this.classroomId,
     required this.originalFee,
     required this.sessionId,
+    this.feeId,
+    this.feeType,
+    this.feeName,
+    this.termName,
   }) : super(key: key);
 
   @override
@@ -37,6 +47,9 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
   String _selectedGateway = 'paystack';
   final TextEditingController _emailController = TextEditingController();
   bool _isProcessing = false;
+
+  bool get _isPayingSingleFee =>
+      widget.feeId != null && widget.feeId!.isNotEmpty;
 
   @override
   void initState() {
@@ -75,7 +88,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
 
     if (!success && mounted) {
       setState(() {
-        _errorMessage = feeProvider.errorMessage ?? 'Failed to calculate discount';
+        _errorMessage =
+            feeProvider.errorMessage ?? 'Failed to calculate discount';
         _isCalculating = false;
       });
     } else if (mounted) {
@@ -93,7 +107,9 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
 
     if (token == null || currentUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Not authenticated'), backgroundColor: AppColors.error),
+        const SnackBar(
+            content: Text('Not authenticated'),
+            backgroundColor: AppColors.error),
       );
       return;
     }
@@ -101,7 +117,9 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     final email = _emailController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid email'), backgroundColor: AppColors.warning),
+        const SnackBar(
+            content: Text('Please enter a valid email'),
+            backgroundColor: AppColors.warning),
       );
       return;
     }
@@ -110,7 +128,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       _isProcessing = true;
     });
 
-    final amountToPay = feeProvider.hasDiscount ? feeProvider.discountedFee : widget.originalFee;
+    final amountToPay =
+    feeProvider.hasDiscount ? feeProvider.discountedFee : widget.originalFee;
 
     showDialog(
       context: context,
@@ -148,38 +167,33 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(feeProvider.errorMessage ?? 'Failed to initiate payment'),
+          content: Text(
+              feeProvider.errorMessage ?? 'Failed to initiate payment'),
           backgroundColor: AppColors.error,
         ),
       );
     }
   }
 
-  // ==================== PAYMENT URL LAUNCHER WITH MULTIPLE FALLBACKS ====================
+  // ==================== PAYMENT URL LAUNCHER ====================
 
   Future<void> _launchPaymentUrlWithFallback(String url) async {
-    // Method 1: Try launching with custom tabs (Chrome)
     bool launched = await _launchWithCustomTabs(url);
     if (launched) return;
 
-    // Method 2: Try launching with external browser
     launched = await _launchWithBrowser(url);
     if (launched) return;
 
-    // Method 3: Try launching with platform default
     launched = await _launchWithPlatformDefault(url);
     if (launched) return;
 
-    // Method 4: Show dialog for manual copy-paste
     _showManualPaymentDialog(url);
   }
 
   Future<bool> _launchWithCustomTabs(String url) async {
     try {
       final Uri uri = Uri.parse(url);
-      // Check if URL can be launched
       if (await canLaunchUrl(uri)) {
-        // Try with Chrome Custom Tabs
         final bool result = await launchUrl(
           uri,
           mode: LaunchMode.externalApplication,
@@ -200,7 +214,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
   Future<bool> _launchWithBrowser(String url) async {
     try {
       final Uri uri = Uri.parse(url);
-      // Try with browser
       final bool result = await launchUrl(
         uri,
         mode: LaunchMode.externalApplication,
@@ -220,7 +233,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
   Future<bool> _launchWithPlatformDefault(String url) async {
     try {
       final Uri uri = Uri.parse(url);
-      // Try with platform default
       final bool result = await launchUrl(
         uri,
         mode: LaunchMode.platformDefault,
@@ -246,7 +258,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       ),
     );
 
-    // Navigate back after a delay
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         Navigator.pop(context, true);
@@ -263,7 +274,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.warning_amber_rounded, size: 48, color: AppColors.warning),
+            const Icon(Icons.warning_amber_rounded,
+                size: 48, color: AppColors.warning),
             const SizedBox(height: 16),
             const Text(
               'We couldn\'t automatically open the payment page.',
@@ -287,7 +299,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             const Text(
               'Please copy the URL and open it in your browser manually.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              style:
+              TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
           ],
         ),
@@ -301,7 +314,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
           ),
           ElevatedButton.icon(
             onPressed: () {
-              // Copy URL to clipboard
               Clipboard.setData(ClipboardData(text: url));
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -321,7 +333,6 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              // Try WebView as last resort
               _openInWebView(url);
             },
             icon: const Icon(Icons.open_in_browser),
@@ -369,7 +380,9 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Fee Payment'),
+        title: Text(_isPayingSingleFee
+            ? 'Pay ${widget.feeName ?? 'Fee'}'
+            : 'Fee Payment'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -405,7 +418,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.error),
+            const Icon(Icons.error_outline,
+                size: 64, color: AppColors.error),
             const SizedBox(height: 16),
             Text(
               _errorMessage!,
@@ -418,7 +432,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -442,6 +457,11 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
         children: [
           _buildStudentInfoCard(),
           const SizedBox(height: 16),
+          // 🆕 Fee identity card (only when paying a single fee)
+          if (_isPayingSingleFee) ...[
+            _buildFeeIdentityCard(),
+            const SizedBox(height: 16),
+          ],
           _buildFeeDetailsCard(feeProvider),
           const SizedBox(height: 16),
           _buildEmailInput(),
@@ -459,12 +479,14 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.error_outline, size: 16, color: AppColors.error),
+                  Icon(Icons.error_outline,
+                      size: 16, color: AppColors.error),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       feeProvider.errorMessage!,
-                      style: TextStyle(color: AppColors.error, fontSize: 13),
+                      style:
+                      TextStyle(color: AppColors.error, fontSize: 13),
                     ),
                   ),
                 ],
@@ -481,7 +503,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             ),
             child: Row(
               children: [
-                Icon(Icons.security_rounded, color: AppColors.info, size: 20),
+                Icon(Icons.security_rounded,
+                    color: AppColors.info, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -514,13 +537,15 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
           Container(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               gradient: AppColors.cardGradient,
               shape: BoxShape.circle,
             ),
             child: Center(
               child: Text(
-                widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : 'S',
+                widget.studentName.isNotEmpty
+                    ? widget.studentName[0].toUpperCase()
+                    : 'S',
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -541,21 +566,145 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary,
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Class: ${widget.studentClass}',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     color: AppColors.textSecondary,
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
                 const SizedBox(height: 2),
                 Text(
                   'Session: ${widget.sessionId}',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 12,
                     color: AppColors.textSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🆕 Fee identity card
+  Widget _buildFeeIdentityCard() {
+    final isTuition = widget.feeType == 'ClassFee';
+    final color = isTuition ? AppColors.primary : AppColors.info;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  isTuition ? Icons.school : Icons.receipt_long,
+                  color: color,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.feeName ?? 'Fee Payment',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 2),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isTuition ? 'Tuition' : 'Other Fee',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: color,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (widget.termName != null &&
+                            widget.termName!.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.greyLight,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              widget.termName!,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'You are paying this specific fee only.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ),
               ],
@@ -578,26 +727,34 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
         gradient: AppColors.cardGradientLight,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: hasDiscount ? AppColors.success.withOpacity(0.3) : AppColors.grey.withOpacity(0.2),
+          color: hasDiscount
+              ? AppColors.success.withOpacity(0.3)
+              : AppColors.grey.withOpacity(0.2),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Fee Details',
-            style: TextStyle(
+          // 🆕 Title changes based on context
+          Text(
+            _isPayingSingleFee
+                ? '${widget.feeName ?? 'Fee'} — Amount'
+                : 'Fee Details',
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: AppColors.primary,
             ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
           const SizedBox(height: 12),
           if (hasDiscount) ...[
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Original Fee:', style: TextStyle(color: AppColors.textSecondary)),
+                const Text('Original Fee:',
+                    style: TextStyle(color: AppColors.textSecondary)),
                 Text(
                   '₦${originalFee.toStringAsFixed(2)}',
                   style: const TextStyle(
@@ -611,7 +768,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Discount:', style: TextStyle(color: AppColors.success)),
+                const Text('Discount:',
+                    style: TextStyle(color: AppColors.success)),
                 Text(
                   '-₦${discountAmount.toStringAsFixed(2)}',
                   style: const TextStyle(
@@ -634,19 +792,25 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
                     color: AppColors.textPrimary,
                   ),
                 ),
-                Text(
-                  '₦${discountedFee.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '₦${discountedFee.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.success.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
@@ -654,14 +818,18 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.discount_rounded, size: 16, color: AppColors.success),
+                  Icon(Icons.discount_rounded,
+                      size: 16, color: AppColors.success),
                   const SizedBox(width: 4),
-                  Text(
-                    'You saved ₦${discountAmount.toStringAsFixed(2)}!',
-                    style: TextStyle(
-                      color: AppColors.success,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
+                  Flexible(
+                    child: Text(
+                      'You saved ₦${discountAmount.toStringAsFixed(2)}!',
+                      style: TextStyle(
+                        color: AppColors.success,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -671,20 +839,27 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Fee Amount:', style: TextStyle(color: AppColors.textSecondary)),
-                Text(
-                  '₦${originalFee.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
+                const Text('Fee Amount:',
+                    style: TextStyle(color: AppColors.textSecondary)),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '₦${originalFee.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.info.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
@@ -692,14 +867,18 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.info_outline_rounded, size: 16, color: AppColors.info),
+                  Icon(Icons.info_outline_rounded,
+                      size: 16, color: AppColors.info),
                   const SizedBox(width: 4),
-                  const Text(
-                    'No discount available',
-                    style: TextStyle(
-                      color: AppColors.info,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
+                  const Flexible(
+                    child: Text(
+                      'No discount available',
+                      style: TextStyle(
+                        color: AppColors.info,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -738,7 +917,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
             decoration: InputDecoration(
               labelText: 'Customer Email',
               hintText: 'Enter your email address',
-              prefixIcon: Icon(Icons.email_outlined, color: AppColors.primary),
+              prefixIcon:
+              Icon(Icons.email_outlined, color: AppColors.primary),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -752,7 +932,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
               ),
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             ),
           ),
         ],
@@ -796,7 +977,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
                     title: Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: Colors.blue.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -811,13 +993,17 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        const Text(
-                          'Paystack',
-                          style: TextStyle(fontWeight: FontWeight.w500),
+                        const Flexible(
+                          child: Text(
+                            'Paystack',
+                            style: TextStyle(fontWeight: FontWeight.w500),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 2),
                           decoration: BoxDecoration(
                             color: Colors.green.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -853,7 +1039,9 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
   }
 
   Widget _buildPayButton(FeeProvider feeProvider, bool isProcessing) {
-    final amount = feeProvider.hasDiscount ? feeProvider.discountedFee : widget.originalFee;
+    final amount = feeProvider.hasDiscount
+        ? feeProvider.discountedFee
+        : widget.originalFee;
 
     return SizedBox(
       width: double.infinity,
@@ -861,7 +1049,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
       child: ElevatedButton(
         onPressed: isProcessing ? null : _initiatePayment,
         style: ElevatedButton.styleFrom(
-          backgroundColor: isProcessing ? AppColors.primary.withOpacity(0.7) : AppColors.primary,
+          backgroundColor:
+          isProcessing ? AppColors.primary.withOpacity(0.7) : AppColors.primary,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -870,10 +1059,10 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
           shadowColor: AppColors.primary.withOpacity(0.3),
         ),
         child: isProcessing
-            ? Row(
+            ? const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const SizedBox(
+            SizedBox(
               height: 22,
               width: 22,
               child: CircularProgressIndicator(
@@ -881,8 +1070,8 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
             ),
-            const SizedBox(width: 12),
-            const Text(
+            SizedBox(width: 12),
+            Text(
               'Processing...',
               style: TextStyle(
                 fontSize: 16,
@@ -896,19 +1085,24 @@ class _FeePaymentScreenState extends State<FeePaymentScreen> {
           children: [
             const Icon(Icons.open_in_browser_rounded, size: 20),
             const SizedBox(width: 10),
-            RichText(
-              text: TextSpan(
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-                children: [
-                  const TextSpan(text: 'Pay '),
-                  TextSpan(
-                    text: '₦${amount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 18),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    children: [
+                      const TextSpan(text: 'Pay '),
+                      TextSpan(
+                        text: '₦${amount.toStringAsFixed(2)}',
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ],
@@ -961,7 +1155,8 @@ class _WebViewPaymentScreenState extends State<WebViewPaymentScreen> {
               final url = change.url!;
               if (url.contains('success') || url.contains('approved')) {
                 widget.onSuccess();
-              } else if (url.contains('cancel') || url.contains('cancelled')) {
+              } else if (url.contains('cancel') ||
+                  url.contains('cancelled')) {
                 widget.onCancel();
               }
             }
@@ -985,7 +1180,8 @@ class _WebViewPaymentScreenState extends State<WebViewPaymentScreen> {
               context: context,
               builder: (context) => AlertDialog(
                 title: const Text('Cancel Payment'),
-                content: const Text('Are you sure you want to cancel this payment?'),
+                content: const Text(
+                    'Are you sure you want to cancel this payment?'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
@@ -997,7 +1193,8 @@ class _WebViewPaymentScreenState extends State<WebViewPaymentScreen> {
                       widget.onCancel();
                       Navigator.pop(context);
                     },
-                    child: const Text('Cancel', style: TextStyle(color: Colors.red)),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Colors.red)),
                   ),
                 ],
               ),
@@ -1025,7 +1222,8 @@ class _WebViewPaymentScreenState extends State<WebViewPaymentScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
+                      valueColor:
+                      AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
                     ),
                     SizedBox(height: 16),
                     Text(

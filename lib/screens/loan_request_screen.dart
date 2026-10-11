@@ -1,14 +1,8 @@
-import 'dart:io';
 import 'dart:async';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_provider.dart';
-import '../services/file_picker_service.dart';
 import '../utils/app_colors.dart';
 
 class LoanRequestScreen extends StatefulWidget {
@@ -33,6 +27,7 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
 
   // ==================== STEP 2: OTP VERIFICATION ====================
   bool _isOtpSent = false;
+  bool _isSendingOtp = false;
   int _otpResendCooldown = 0;
   Timer? _resendTimer;
   final TextEditingController _otpController = TextEditingController();
@@ -51,26 +46,15 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
   String? _selectedIncomeSource;
   final TextEditingController _tenureMonthsController = TextEditingController();
   final TextEditingController _employerNameController = TextEditingController();
-  final TextEditingController _documentPasswordController = TextEditingController();
-
-  // File Selection
-  File? _selectedFile;
-  String? _selectedFileName;
-  bool _isFileSelected = false;
+  final TextEditingController _documentPasswordController =
+  TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // Auto-fill test data for Step 1
-    _bvnController.text = '22146518957';
-    _phoneController.text = '07026790425';
-
-    // Auto-fill test data for Step 3
-    _bankAccountController.text = '0123456789';
-    _bankCodeController.text = '044';
-    _bankNameController.text = 'Access Bank';
-    _selectedIncomeSource = 'BusinessOwner';
-    _tenureMonthsController.text = '6';
+    // Don't auto-fill BVN in production. Uncomment only for testing.
+    // _bvnController.text = '22146518957';
+    // _phoneController.text = '07026790425';
   }
 
   @override
@@ -110,7 +94,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 _buildHeaderCard(isSmallScreen),
                 const SizedBox(height: 24),
 
-                // Show different content based on current step
                 if (_showSuccessScreen)
                   _buildSuccessStep(isSmallScreen)
                 else if (_isBvnVerified)
@@ -127,6 +110,8 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     );
   }
 
+  // ==================== HEADER WITH EDUBANC BRANDING ====================
+
   Widget _buildHeaderCard(bool isSmallScreen) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -140,39 +125,86 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.credit_card,
-              color: Colors.white,
-              size: 28,
-            ),
+          // Top row — icon + title
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.credit_card,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Loan Application',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      _getStepDescription(),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+
+          // Edubanc "Powered by" strip
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
               children: [
                 const Text(
-                  'Loan Application',
+                  'Powered by',
                   style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    color: Colors.white70,
+                    letterSpacing: 0.3,
                   ),
                 ),
-                Text(
-                  _getStepDescription(),
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
-                    fontSize: 13,
-                  ),
+                const SizedBox(width: 8),
+                Image.asset(
+                  'assets/images/edubanc_logo.png',
+                  height: 18,
+                  fit: BoxFit.contain,
+                  color: Colors.white,
+                  colorBlendMode: BlendMode.srcIn,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Text(
+                      'edubanc',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -195,7 +227,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Progress indicator
         _buildProgressIndicator(1),
         const SizedBox(height: 24),
 
@@ -225,7 +256,8 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Enter your BVN and phone number. An OTP will be sent to your phone.',
+                'Enter your BVN and the phone number registered with your BVN. '
+                    'An OTP will be sent to that phone number.',
                 style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
               ),
             ],
@@ -272,35 +304,10 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
                   labelText: 'Phone Number',
-                  hintText: 'Enter phone number (e.g., 07026790425)',
+                  hintText: 'Enter the phone number linked to your BVN',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.phone),
                   prefixText: '0',
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.info.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.info.withOpacity(0.3)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.science, color: AppColors.info, size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Test Mode: BVN: 22146518957, Phone: 07026790425',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.info,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -312,11 +319,13 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                   decoration: BoxDecoration(
                     color: AppColors.error.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                    border:
+                    Border.all(color: AppColors.error.withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: AppColors.error),
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -358,7 +367,8 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                   )
                       : const Text(
                     'Send OTP',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -375,7 +385,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Progress indicator
         _buildProgressIndicator(2),
         const SizedBox(height: 24),
 
@@ -404,7 +413,7 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                     ),
                     Text(
                       'Enter the 6-digit code sent to ${_phoneController.text}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
                       ),
@@ -450,35 +459,12 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 keyboardType: TextInputType.number,
                 maxLength: 6,
                 autofocus: true,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'OTP',
                   hintText: 'Enter 6-digit OTP',
                   border: OutlineInputBorder(),
-                  prefixIcon: const Icon(Icons.password),
+                  prefixIcon: Icon(Icons.password),
                   counterText: '',
-                  suffixIcon: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    margin: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: AppColors.info.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.science, color: AppColors.info, size: 16),
-                        SizedBox(width: 4),
-                        Text(
-                          'Test: 000000',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.info,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -487,19 +473,16 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
-                    onPressed: _otpResendCooldown > 0
+                    onPressed: (_otpResendCooldown > 0 || _isSendingOtp)
                         ? null
-                        : () {
-                      // Just reset the timer without calling API
-                      _startResendTimer();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('OTP resent! (Test Mode)'),
-                          backgroundColor: AppColors.info,
-                        ),
-                      );
-                    },
-                    child: Text(
+                        : _resendOtp,
+                    child: _isSendingOtp
+                        ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                        : Text(
                       _otpResendCooldown > 0
                           ? 'Resend in ${_otpResendCooldown}s'
                           : 'Resend OTP',
@@ -521,9 +504,7 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                     },
                     child: const Text(
                       '← Back',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                      ),
+                      style: TextStyle(color: AppColors.textSecondary),
                     ),
                   ),
                 ],
@@ -538,11 +519,13 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                   decoration: BoxDecoration(
                     color: AppColors.error.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                    border:
+                    Border.all(color: AppColors.error.withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: AppColors.error),
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -557,7 +540,8 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isBvnVerificationInProgress ? null : _verifyOtp,
+                  onPressed:
+                  _isBvnVerificationInProgress ? null : _verifyOtp,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.success,
                     foregroundColor: Colors.white,
@@ -584,7 +568,8 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                   )
                       : const Text(
                     'Verify OTP',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -601,7 +586,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Progress indicator
         _buildProgressIndicator(3),
         const SizedBox(height: 24),
 
@@ -613,10 +597,10 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
             border: Border.all(color: AppColors.success.withOpacity(0.3)),
           ),
           child: Row(
-            children: [
-              const Icon(Icons.check_circle, color: AppColors.success),
-              const SizedBox(width: 8),
-              const Expanded(
+            children: const [
+              Icon(Icons.check_circle, color: AppColors.success),
+              SizedBox(width: 8),
+              Expanded(
                 child: Text(
                   'BVN Verified Successfully! Complete the form to apply.',
                   style: TextStyle(color: AppColors.success),
@@ -650,11 +634,13 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 children: [
                   const Text(
                     'BVN: ',
-                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary),
                   ),
                   Text(
                     _bvnController.text,
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
@@ -662,11 +648,13 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                 children: [
                   const Text(
                     'Phone: ',
-                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary),
                   ),
                   Text(
                     _phoneController.text,
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
@@ -718,7 +706,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Bank Account Number
               TextField(
                 controller: _bankAccountController,
                 keyboardType: TextInputType.number,
@@ -731,7 +718,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Bank Code
               TextField(
                 controller: _bankCodeController,
                 keyboardType: TextInputType.text,
@@ -744,7 +730,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Bank Name
               TextField(
                 controller: _bankNameController,
                 decoration: const InputDecoration(
@@ -756,7 +741,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Income Source
               DropdownButtonFormField<String>(
                 value: _selectedIncomeSource,
                 decoration: const InputDecoration(
@@ -765,8 +749,10 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                   prefixIcon: Icon(Icons.work),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'SalaryEarner', child: Text('Salary Earner')),
-                  DropdownMenuItem(value: 'BusinessOwner', child: Text('Business Owner')),
+                  DropdownMenuItem(
+                      value: 'SalaryEarner', child: Text('Salary Earner')),
+                  DropdownMenuItem(
+                      value: 'BusinessOwner', child: Text('Business Owner')),
                 ],
                 onChanged: (String? value) {
                   setState(() {
@@ -776,7 +762,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Tenure Months
               TextField(
                 controller: _tenureMonthsController,
                 keyboardType: TextInputType.number,
@@ -789,7 +774,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Employer Name (Optional)
               TextField(
                 controller: _employerNameController,
                 decoration: const InputDecoration(
@@ -800,7 +784,6 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Document Password (Optional)
               TextField(
                 controller: _documentPasswordController,
                 decoration: const InputDecoration(
@@ -813,123 +796,38 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
               ),
               const SizedBox(height: 16),
 
-              // File Upload
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _isFileSelected ? AppColors.success : AppColors.grey,
-                    style: BorderStyle.solid,
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                  color: _isFileSelected ? AppColors.success.withOpacity(0.05) : Colors.transparent,
+                  color: AppColors.info.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                  Border.all(color: AppColors.info.withOpacity(0.2)),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: const Row(
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _isFileSelected ? Icons.file_present : Icons.upload_file,
-                          color: _isFileSelected ? AppColors.success : AppColors.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _isFileSelected
-                                ? _selectedFileName ?? 'File selected'
-                                : 'Upload Bank Statement (PDF, JPEG, PNG - Max 5MB)',
-                            style: TextStyle(
-                              color: _isFileSelected ? AppColors.success : AppColors.textSecondary,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _pickFile,
-                            icon: const Icon(Icons.attach_file),
-                            label: const Text('Choose File'),
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: AppColors.primary),
-                              foregroundColor: AppColors.primary,
-                            ),
-                          ),
-                        ),
-                        if (_isFileSelected) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _selectedFile = null;
-                                _selectedFileName = null;
-                                _isFileSelected = false;
-                              });
-                            },
-                            icon: const Icon(Icons.close, color: AppColors.error),
-                            tooltip: 'Remove file',
-                          ),
-                        ],
-                      ],
-                    ),
-                    if (_isFileSelected)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.check_circle, color: AppColors.success, size: 16),
-                            const SizedBox(width: 4),
-                            Text(
-                              'File ready for upload',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.success,
-                              ),
-                            ),
-                          ],
-                        ),
+                    Icon(Icons.info_outline,
+                        color: AppColors.info, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'After submitting, you will upload your bank statement for credit assessment.',
+                        style: TextStyle(
+                            fontSize: 11, color: AppColors.textSecondary),
                       ),
-                    if (!_isFileSelected)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppColors.info.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.info.withOpacity(0.2)),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.info_outline, color: AppColors.info, size: 14),
-                              SizedBox(width: 4),
-                              Text(
-                                'Upload a PDF, JPEG, or PNG file (max 5MB)',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    ),
                   ],
                 ),
               ),
 
               const SizedBox(height: 24),
 
-              // Submit Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isLoanRequestInProgress ? null : _submitLoanApplication,
+                  onPressed: _isLoanRequestInProgress
+                      ? null
+                      : _proceedToCreditAssessment,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -951,12 +849,13 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
                         ),
                       ),
                       SizedBox(width: 12),
-                      Text('Submitting...'),
+                      Text('Processing...'),
                     ],
                   )
                       : const Text(
-                    'Submit Loan Application',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    'Proceed to Upload Bank Statement',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -967,7 +866,7 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     );
   }
 
-  // ==================== SUCCESS SCREEN ====================
+  // ==================== SUCCESS SCREEN (WITH EDUBANC LOGO) ====================
 
   Widget _buildSuccessStep(bool isSmallScreen) {
     return Column(
@@ -996,8 +895,28 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
           ),
         ),
         const SizedBox(height: 24),
+
+        // Edubanc logo on success screen
+        Image.asset(
+          'assets/images/edubanc_logo.png',
+          height: 28,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return const Text(
+              'edubanc',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+                letterSpacing: -1,
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+
         const Text(
-          'Application Submitted!',
+          'BVN Verified!',
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
@@ -1005,74 +924,16 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
-          'Your loan application has been submitted successfully.',
-          style: TextStyle(
-            fontSize: 14,
-            color: AppColors.textSecondary,
-          ),
+        const Text(
+          'Proceed to upload your bank statement for credit assessment.',
+          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
           textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.info.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.info.withOpacity(0.2)),
-          ),
-          child: Column(
-            children: [
-              const Text(
-                'Application ID:',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _applicationId ?? 'N/A',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.warning.withOpacity(0.2)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, color: AppColors.warning, size: 14),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'We are processing your application. You will receive an update shortly.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ),
         const SizedBox(height: 32),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
@@ -1159,84 +1020,238 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     );
   }
 
-  // ==================== BVN METHODS (Test Mode - No API Call) ====================
+  // ==================== API METHODS ====================
 
+  /// Step 1 → Send OTP
   Future<void> _sendOtp() async {
-    // Validate BVN and Phone
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+
+    if (token == null || user == null) {
+      setState(() {
+        _bvnErrorMessage = 'Authentication error. Please login again.';
+      });
+      return;
+    }
+
+    if (user.schoolId.isEmpty ||
+        user.schoolId == '00000000-0000-0000-0000-000000000000') {
+      setState(() =>
+      _bvnErrorMessage = 'Internal school ID missing. Please re-login.');
+      return;
+    }
+
     final String bvn = _bvnController.text.trim();
     final String phone = _phoneController.text.trim();
 
     if (bvn.isEmpty || bvn.length < 11) {
-      setState(() {
-        _bvnErrorMessage = 'Please enter a valid 11-digit BVN';
-      });
+      setState(() => _bvnErrorMessage = 'Please enter a valid 11-digit BVN');
       return;
     }
 
     if (phone.isEmpty || phone.length < 10) {
-      setState(() {
-        _bvnErrorMessage = 'Please enter a valid phone number';
-      });
+      setState(() => _bvnErrorMessage = 'Please enter a valid phone number');
       return;
     }
 
-    // TEST MODE: Bypass API call and go directly to OTP entry
     setState(() {
-      _isOtpSent = true;
+      _isBvnVerificationInProgress = true;
       _bvnErrorMessage = null;
-      _otpController.clear();
-      // Set a test session ID for simulation
-      _bvnSessionId = 'test-session-123';
     });
 
-    _startResendTimer();
+    try {
+      // 1. Initiate BVN session
+      final initiateResult = await _apiService.initiateBvnVerification(
+        token: token,
+        guardianId: user.id,
+        internalSchoolId: user.schoolId,
+      );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Test Mode: OTP sent! (Use 000000)'),
-        backgroundColor: AppColors.info,
-      ),
-    );
+      if (!initiateResult['success']) {
+        setState(() {
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage =
+              initiateResult['message'] ?? 'Failed to initiate BVN';
+        });
+        return;
+      }
+
+      final String? sessionId = initiateResult['sessionId'];
+      if (sessionId == null || sessionId.isEmpty) {
+        setState(() {
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage = 'Invalid session response from server';
+        });
+        return;
+      }
+
+      setState(() => _bvnSessionId = sessionId);
+
+      // 2. Actually send the OTP to the phone number
+      final verifyResult = await _apiService.verifyBvnMethod(
+        token: token,
+        guardianId: user.id,
+        internalSchoolId: user.schoolId,
+        sessionId: sessionId,
+        method: 'phone',
+        phoneNumber: phone,
+      );
+
+      if (verifyResult['success']) {
+        setState(() {
+          _isOtpSent = true;
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage = null;
+          _otpController.clear();
+        });
+
+        _startResendTimer();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('OTP sent to $phone'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      } else {
+        setState(() {
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage = verifyResult['message'] ?? 'Failed to send OTP';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isBvnVerificationInProgress = false;
+        _bvnErrorMessage = 'Error: ${e.toString()}';
+      });
+    }
   }
 
-  Future<void> _verifyOtp() async {
-    final String otp = _otpController.text.trim();
+  /// Resend OTP
+  Future<void> _resendOtp() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
 
-    if (otp.isEmpty || otp.length < 6) {
-      setState(() {
-        _bvnErrorMessage = 'Please enter a valid 6-digit OTP';
-      });
+    if (token == null || user == null) {
+      setState(() => _bvnErrorMessage = 'Authentication error');
       return;
     }
 
-    // TEST MODE: Accept any 6-digit OTP, but specifically 000000
-    if (otp == '000000') {
-      setState(() {
-        _isBvnVerified = true;
-        _isBvnVerificationInProgress = false;
-        _bvnErrorMessage = null;
-      });
+    if (_bvnSessionId == null || _bvnSessionId!.isEmpty) {
+      setState(() =>
+      _bvnErrorMessage = 'Session expired. Please go back and try again.');
+      return;
+    }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('BVN Verified Successfully! 🎉'),
-          backgroundColor: AppColors.success,
-        ),
+    setState(() {
+      _isSendingOtp = true;
+      _bvnErrorMessage = null;
+    });
+
+    try {
+      final result = await _apiService.verifyBvnMethod(
+        token: token,
+        guardianId: user.id,
+        internalSchoolId: user.schoolId,
+        sessionId: _bvnSessionId!,
+        method: 'phone',
+        phoneNumber: _phoneController.text.trim(),
       );
-    } else {
+
+      setState(() => _isSendingOtp = false);
+
+      if (result['success']) {
+        _startResendTimer();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('OTP resent successfully'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      } else {
+        setState(() {
+          _bvnErrorMessage = result['message'] ?? 'Failed to resend OTP';
+        });
+      }
+    } catch (e) {
       setState(() {
-        _bvnErrorMessage = 'Invalid OTP. Please enter the correct OTP.';
+        _isSendingOtp = false;
+        _bvnErrorMessage = 'Error: ${e.toString()}';
+      });
+    }
+  }
+
+  /// Verify OTP
+  Future<void> _verifyOtp() async {
+    final otp = _otpController.text.trim();
+    final bvn = _bvnController.text.trim();
+    final phone = _phoneController.text.trim();
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+
+    if (token == null || user == null) {
+      setState(() => _bvnErrorMessage = 'Authentication error');
+      return;
+    }
+
+    if (otp.isEmpty || otp.length < 6) {
+      setState(() => _bvnErrorMessage = 'Please enter the 6-digit OTP');
+      return;
+    }
+
+    setState(() {
+      _isBvnVerificationInProgress = true;
+      _bvnErrorMessage = null;
+    });
+
+    try {
+      final result = await _apiService.confirmBvnOtp(
+        token: token,
+        guardianId: user.id,
+        internalSchoolId: user.schoolId,
+        sessionId: _bvnSessionId ?? '',
+        otp: otp,
+        bvn: bvn,
+        bvnPhoneNumber: phone,
+      );
+
+      if (result['success']) {
+        setState(() {
+          _isBvnVerified = true;
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('BVN Verified Successfully! 🎉'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      } else {
+        setState(() {
+          _isBvnVerificationInProgress = false;
+          _bvnErrorMessage =
+              result['message'] ?? 'Invalid OTP. Please try again.';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isBvnVerificationInProgress = false;
+        _bvnErrorMessage = 'Error: ${e.toString()}';
       });
     }
   }
 
   void _startResendTimer() {
     _resendTimer?.cancel();
-    setState(() {
-      _otpResendCooldown = 30;
-    });
+    setState(() => _otpResendCooldown = 60);
 
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         if (_otpResendCooldown > 0) {
           _otpResendCooldown--;
@@ -1247,293 +1262,9 @@ class _LoanRequestScreenState extends State<LoanRequestScreen> {
     });
   }
 
-  // ==================== FILE PICKER ====================
-
-
-  // Add this method to request permissions
-  // Future<bool> _requestStoragePermission() async {
-  //   try {
-  //     if (Platform.isAndroid) {
-  //       // For Android 13+ (API 33+)
-  //       if (await Permission.storage.isGranted) {
-  //         final status = await Permission.storage.request();
-  //         if (status.isGranted) {
-  //           return true;
-  //         }
-  //       }
-  //
-  //       // For Android 11+ (API 30+), use manage external storage
-  //       if (await Permission.manageExternalStorage.isGranted) {
-  //         final status = await Permission.manageExternalStorage.request();
-  //         if (status.isGranted) {
-  //           return true;
-  //         }
-  //       }
-  //
-  //       return await Permission.storage.isGranted;
-  //     }
-  //     return true; // iOS doesn't need this permission
-  //   } catch (e) {
-  //     print('Permission error: $e');
-  //     return false;
-  //   }
-  // }
-
-
-// Updated _pickFile method
-
-
-  Future<void> _pickFile() async {
-    try {
-      // Request permission for Android
-      if (Platform.isAndroid) {
-        final hasPermission = await _requestStoragePermission();
-        if (!hasPermission) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Storage permission required to select files'),
-              backgroundColor: AppColors.warning,
-            ),
-          );
-          return;
-        }
-      }
-
-      // Show file type selection
-      final fileType = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Select File Type'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.image),
-                title: const Text('Image (JPEG/PNG)'),
-                onTap: () => Navigator.pop(context, 'image'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.picture_as_pdf),
-                title: const Text('PDF Document'),
-                onTap: () => Navigator.pop(context, 'pdf'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'cancel'),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      );
-
-      if (fileType == null || fileType == 'cancel') {
-        return;
-      }
-
-      Map<String, dynamic>? result;
-
-      if (fileType == 'image') {
-        result = await FilePickerService.pickFile(
-          allowedExtensions: ['jpg', 'jpeg', 'png'],
-        );
-      } else if (fileType == 'pdf') {
-        result = await FilePickerService.pickFile(
-          allowedExtensions: ['pdf'],
-        );
-      }
-
-      if (result != null) {
-        final fileSize = result['size'] as int? ?? 0;
-        if (fileSize > 5 * 1024 * 1024) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('File size exceeds 5MB limit. Please compress the file.'),
-              backgroundColor: AppColors.error,
-            ),
-          );
-          return;
-        }
-
-        String? path = result['path'];
-        String name = result['name'] ?? 'file';
-
-        if (path != null && path.isNotEmpty) {
-          setState(() {
-            _selectedFile = File(path);
-            _selectedFileName = name;
-            _isFileSelected = true;
-          });
-        }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('File selected: $name'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error picking file: ${e.toString()}'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-
-
-
-  Future<bool> _requestStoragePermission() async {
-    try {
-      if (Platform.isAndroid) {
-        // For Android 13+ (API 33+)
-        final androidInfo = await DeviceInfoPlugin().androidInfo;
-        final sdkInt = androidInfo.version.sdkInt;
-
-        if (sdkInt >= 33) {
-          // Android 13+ - use READ_MEDIA_IMAGES
-          final status = await Permission.photos.request();
-          if (status.isGranted) {
-            return true;
-          }
-          final storageStatus = await Permission.storage.request();
-          return storageStatus.isGranted;
-        } else if (sdkInt >= 30) {
-          // Android 11-12 - use MANAGE_EXTERNAL_STORAGE
-          final status = await Permission.manageExternalStorage.request();
-          if (status.isGranted) {
-            return true;
-          }
-          final storageStatus = await Permission.storage.request();
-          return storageStatus.isGranted;
-        } else {
-          // Android 10 and below
-          final status = await Permission.storage.request();
-          return status.isGranted;
-        }
-      }
-      return true; // iOS doesn't need this permission
-    } catch (e) {
-      print('Permission error: $e');
-      return false;
-    }
-  }
-
-  // ==================== SUBMIT APPLICATION ====================
-
-  Future<void> _submitLoanApplication() async {
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
-
-    if (token == null || user == null) {
-      setState(() {
-        _loanErrorMessage = 'Authentication error. Please login again.';
-      });
-      return;
-    }
-
-    // Validate all fields
-    final String bankAccount = _bankAccountController.text.trim();
-    final String bankCode = _bankCodeController.text.trim();
-    final String bankName = _bankNameController.text.trim();
-    final String tenureMonths = _tenureMonthsController.text.trim();
-
-    if (bankAccount.isEmpty || bankAccount.length < 10) {
-      setState(() {
-        _loanErrorMessage = 'Please enter a valid bank account number';
-      });
-      return;
-    }
-
-    if (bankCode.isEmpty) {
-      setState(() {
-        _loanErrorMessage = 'Please enter the bank code';
-      });
-      return;
-    }
-
-    if (bankName.isEmpty) {
-      setState(() {
-        _loanErrorMessage = 'Please enter the bank name';
-      });
-      return;
-    }
-
-    if (_selectedIncomeSource == null || _selectedIncomeSource!.isEmpty) {
-      setState(() {
-        _loanErrorMessage = 'Please select your income source';
-      });
-      return;
-    }
-
-    if (tenureMonths.isEmpty || int.tryParse(tenureMonths) == null) {
-      setState(() {
-        _loanErrorMessage = 'Please enter a valid tenure in months';
-      });
-      return;
-    }
-
-    if (!_isFileSelected || _selectedFile == null) {
-      setState(() {
-        _loanErrorMessage = 'Please upload your bank statement';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoanRequestInProgress = true;
-      _loanErrorMessage = null;
-    });
-
-    try {
-      final result = await _apiService.uploadCreditAssessment(
-        token: token,
-        guardianId: user.id,
-        edubanclSchoolId: user.schoolId,
-        bankAccountNumber: bankAccount,
-        bankCode: bankCode,
-        bankName: bankName,
-        incomeSource: _selectedIncomeSource!,
-        tenureMonths: int.parse(tenureMonths),
-        file: _selectedFile!,
-        documentPassword: _documentPasswordController.text.trim().isEmpty
-            ? null
-            : _documentPasswordController.text.trim(),
-        employerName: _employerNameController.text.trim().isEmpty
-            ? null
-            : _employerNameController.text.trim(),
-      );
-
-      if (result['success']) {
-        setState(() {
-          _applicationId = result['applicationId'];
-          _isLoanRequestInProgress = false;
-          _loanSuccessMessage = result['message'] ?? 'Application submitted successfully!';
-          _loanErrorMessage = null;
-          _showSuccessScreen = true;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Application submitted successfully! 🎉'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      } else {
-        setState(() {
-          _isLoanRequestInProgress = false;
-          _loanErrorMessage = result['message'] ?? 'Failed to submit application';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoanRequestInProgress = false;
-        _loanErrorMessage = 'Error: ${e.toString()}';
-      });
-    }
+  /// Proceed to credit assessment step
+  Future<void> _proceedToCreditAssessment() async {
+    // After BVN verification, navigate to the credit assessment upload screen
+    Navigator.pop(context, true);
   }
 }

@@ -38,6 +38,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedIndex = 0;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // ==================== DATA STATES ====================
   late UserModel _currentUser;
@@ -54,21 +55,35 @@ class _AdminDashboardState extends State<AdminDashboard> {
   List<Map<String, dynamic>> _guardianTransactions = [];
   int _guardianCount = 0;
 
-  // Classroom financial data cache
   Map<String, Map<String, dynamic>> _classroomFinancialData = {};
   bool _financialDataLoaded = false;
-
-  // Guardian to students mapping
   Map<String, List<Map<String, dynamic>>> _guardianStudentsMap = {};
 
-  // Messages - Unread count
+  // ==================== TEACHER ATTENDANCE ====================
+  List<Map<String, dynamic>> _teacherAttendance = [];
+  Map<String, dynamic> _teacherAttendanceSummary = {
+    'total': 0,
+    'present': 0,
+    'absent': 0,
+    'late': 0,
+  };
+  bool _isLoadingTeacherAttendance = false;
+  String? _teacherAttendanceError;
+  final TextEditingController _teacherAttendanceSearchController =
+  TextEditingController();
+  String _teacherAttendanceFilter = 'all';
+
   int _unreadMessageCount = 0;
 
   // Search Controllers
-  final TextEditingController _studentSearchController = TextEditingController();
-  final TextEditingController _teacherSearchController = TextEditingController();
-  final TextEditingController _guardianSearchController = TextEditingController();
-  final TextEditingController _classroomSearchController = TextEditingController();
+  final TextEditingController _studentSearchController =
+  TextEditingController();
+  final TextEditingController _teacherSearchController =
+  TextEditingController();
+  final TextEditingController _guardianSearchController =
+  TextEditingController();
+  final TextEditingController _classroomSearchController =
+  TextEditingController();
 
   bool _isSearchingStudents = false;
   bool _isSearchingTeachers = false;
@@ -79,7 +94,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isRefreshing = false;
   String? _errorMessage;
 
-  // Responsive variables
+  bool _isInitialized = false;
+
   late bool _isMobile;
   late bool _isTablet;
   late bool _isDesktop;
@@ -88,67 +104,87 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void initState() {
     super.initState();
     _apiService = ApiService();
-    _loadUserData();
-    _fetchDashboardData();
-    _fetchUnreadMessages();
 
-    NotificationService().onNotificationTap = (data) async {
-      print('📱 Notification tapped: $data');
-      if (data.containsKey('senderId') && data.containsKey('senderRole')) {
-        final senderId = data['senderId'];
-        final senderRole = data['senderRole'];
-        final senderName = data['senderName'] ?? 'User';
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ConversationScreen(
-                userId: senderId,
-                userRole: senderRole,
-                userName: senderName,
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationService().onNotificationTap = (data) async {
+        if (data.containsKey('senderId') && data.containsKey('senderRole')) {
+          final senderId = data['senderId'];
+          final senderRole = data['senderRole'];
+          final senderName = data['senderName'] ?? 'User';
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ConversationScreen(
+                  userId: senderId,
+                  userRole: senderRole,
+                  userName: senderName,
+                ),
               ),
-            ),
-          );
+            );
+          }
         }
-      }
-    };
+      };
+    });
   }
 
-  // ==================== DATA FETCHING METHODS ====================
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isInitialized) {
+      _isInitialized = true;
+      _loadUserData();
+      _fetchDashboardData();
+      _fetchUnreadMessages();
+    }
+  }
+
+  @override
+  void dispose() {
+    _studentSearchController.dispose();
+    _teacherSearchController.dispose();
+    _guardianSearchController.dispose();
+    _classroomSearchController.dispose();
+    _teacherAttendanceSearchController.dispose();
+    super.dispose();
+  }
+
+  // ==================== DATA FETCHING ====================
 
   String _getCurrentSessionId() {
     String sessionId = _currentUser.sessionId ?? '';
     if (sessionId.isEmpty) {
       final now = DateTime.now();
-      final year = now.year;
-      final nextYear = year + 1;
-      sessionId = '$year/$nextYear';
-      print('⚠️ Using default session ID: $sessionId');
+      sessionId = '${now.year}/${now.year + 1}';
     }
     return sessionId;
   }
 
   void _loadUserData() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    _currentUser = authProvider.currentUser!;
+    final user = authProvider.currentUser;
+    if (user == null) return;
+    _currentUser = user;
   }
 
   Future<void> _fetchUnreadMessages() async {
     final token = Provider.of<AuthProvider>(context, listen: false).token;
     if (token == null) return;
 
-    final result = await _apiService.getInboxMessages(
-      token: token,
-      userId: _currentUser.id,
-      userRole: 'SchoolAdmin',
-    );
+    try {
+      final result = await _apiService.getInboxMessages(
+        token: token,
+        userId: _currentUser.id,
+        userRole: 'SchoolAdmin',
+      );
 
-    if (result['success'] && mounted) {
-      final messages = result['data'] as List? ?? [];
-      final unreadCount = messages.where((m) => m['isRead'] == false).length;
-      setState(() {
-        _unreadMessageCount = unreadCount;
-      });
+      if (result['success'] && mounted) {
+        final messages = result['data'] as List? ?? [];
+        final unreadCount = messages.where((m) => m['isRead'] == false).length;
+        setState(() => _unreadMessageCount = unreadCount);
+      }
+    } catch (e) {
+      print('Error fetching unread messages: $e');
     }
   }
 
@@ -168,13 +204,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
       return;
     }
 
+    if (_currentUser.schoolId.isEmpty) {
+      setState(() {
+        _errorMessage = 'School information not loaded. Please re-login.';
+        _isLoading = false;
+      });
+      return;
+    }
+
     try {
       final sessionId = _getCurrentSessionId();
       final termId = _currentUser.termId ?? '1';
-
-      print('📊 Fetching dashboard data...');
-      print('📅 Session ID: $sessionId');
-      print('📚 Term ID: $termId');
 
       final expectedRevenueResult = await _apiService.getExpectedRevenueForTerm(
         token: token,
@@ -183,28 +223,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
 
       Map<String, Map<String, dynamic>> expectedRevenueMap = {};
-      double totalExpectedRevenue = 0;
 
-      if (expectedRevenueResult['success'] && expectedRevenueResult['data'] != null) {
+      if (expectedRevenueResult['success'] &&
+          expectedRevenueResult['data'] != null) {
         final data = expectedRevenueResult['data'];
         final classroomDetails = data['classroomDetails'] as List? ?? [];
-        print('📊 Found ${classroomDetails.length} classroom details');
-
         for (var classroom in classroomDetails) {
-          final classFee = (classroom['classFee'] ?? 0.0).toDouble();
-          final numberOfStudents = (classroom['numberOfStudents'] ?? 0).toInt();
-          final expectedRevenue = (classroom['expectedRevenue'] ?? 0.0).toDouble();
-          totalExpectedRevenue += expectedRevenue;
-
           expectedRevenueMap[classroom['classroomId']] = {
-            'expectedRevenue': expectedRevenue,
-            'classFee': classFee,
-            'numberOfStudents': numberOfStudents,
+            'expectedRevenue':
+            (classroom['expectedRevenue'] ?? 0.0).toDouble(),
+            'classFee': (classroom['classFee'] ?? 0.0).toDouble(),
+            'numberOfStudents':
+            (classroom['numberOfStudents'] ?? 0).toInt(),
           };
         }
-        print('💰 Total Expected Revenue: ₦$totalExpectedRevenue');
-      } else {
-        print('❌ Failed to fetch expected revenue: ${expectedRevenueResult['message']}');
       }
 
       await _fetchClassrooms(token, expectedRevenueMap);
@@ -217,7 +249,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _fetchGuardianTransactions(token),
       ]);
 
-      await _fetchAllClassroomFinancialData(token, expectedRevenueMap, sessionId, termId);
+      await _fetchTeacherAttendance();
+      await _fetchAllClassroomFinancialData(
+          token, expectedRevenueMap, sessionId, termId);
 
       setState(() {
         _filteredStudents = List.from(_students);
@@ -228,9 +262,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
 
       _fetchGuardianStudentsMappings(token);
-
     } catch (e) {
-      print('❌ Error in _fetchDashboardData: $e');
       setState(() {
         _errorMessage = 'Error loading data. Please check your connection.';
         _isLoading = false;
@@ -240,14 +272,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _fetchStudents(String token) async {
     try {
+      if (_currentUser.schoolId.isEmpty) return;
       final result = await _apiService.getAllStudentsBySchool(
         token: token,
         schoolId: _currentUser.schoolId,
       );
-      if (result['success'] && mounted) {
+
+      if (result['success'] == true && mounted) {
         final studentsData = result['data'] as List? ?? [];
-        setState(() {
-          _students = studentsData.map((s) => ({
+        final mapped = <Map<String, dynamic>>[];
+        for (final s in studentsData) {
+          mapped.add({
             'id': s['studentId'] ?? '',
             'name': '${s['firstname'] ?? ''} ${s['lastname'] ?? ''}'.trim(),
             'admissionNo': s['studentNo'] ?? s['admissionNo'] ?? '',
@@ -258,17 +293,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'guardianPhone': s['guardianPhone'] ?? 'N/A',
             'guardianEmail': s['guardianEmail'] ?? 'N/A',
             'teacherId': s['teacherId'] ?? '',
-            'teacherName': s['teacher']?['firstname'] != null
-                ? '${s['teacher']['firstname']} ${s['teacher']['lastname']}'.trim()
-                : 'Not Assigned',
+            'teacherName': 'Not Assigned',
             'gender': s['gender'] ?? 'Not specified',
             'dateOfBirth': s['dateOfBirth'] ?? '',
-          })).toList();
+          });
+        }
+        setState(() {
+          _students = mapped;
           _filteredStudents = List.from(_students);
         });
       }
     } catch (e) {
-      print('Error fetching students: $e');
+      print('❌ _fetchStudents: $e');
     }
   }
 
@@ -278,17 +314,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (query.isEmpty) {
         _filteredStudents = List.from(_students);
       } else {
-        _filteredStudents = _students.where((student) {
-          final name = student['name'].toString().toLowerCase();
-          final admissionNo = student['admissionNo'].toString().toLowerCase();
-          final className = student['className'].toString().toLowerCase();
-          final guardianName = student['guardianName'].toString().toLowerCase();
-          final teacherName = student['teacherName'].toString().toLowerCase();
+        _filteredStudents = _students.where((s) {
+          final name = s['name'].toString().toLowerCase();
+          final admissionNo = s['admissionNo'].toString().toLowerCase();
+          final className = s['className'].toString().toLowerCase();
+          final guardianName = s['guardianName'].toString().toLowerCase();
           return name.contains(query.toLowerCase()) ||
               admissionNo.contains(query.toLowerCase()) ||
               className.contains(query.toLowerCase()) ||
-              guardianName.contains(query.toLowerCase()) ||
-              teacherName.contains(query.toLowerCase());
+              guardianName.contains(query.toLowerCase());
         }).toList();
       }
     });
@@ -302,30 +336,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
       if (result['success'] && mounted) {
         final teachersData = result['data'] as List? ?? [];
-
         final Map<String, String> teacherClassMap = {};
         for (var classroom in _classrooms) {
-          if (classroom['teacherId'] != null && classroom['teacherId'].toString().isNotEmpty) {
-            teacherClassMap[classroom['teacherId'].toString()] = classroom['name'];
+          if (classroom['teacherId'] != null &&
+              classroom['teacherId'].toString().isNotEmpty) {
+            teacherClassMap[classroom['teacherId'].toString()] =
+            classroom['name'];
           }
         }
 
         setState(() {
-          _teachers = teachersData.map((t) => ({
+          _teachers = teachersData
+              .map((t) => {
             'id': t['teacherId'],
-            'name': '${t['firstname'] ?? ''} ${t['lastname'] ?? ''}'.trim(),
+            'name':
+            '${t['firstname'] ?? ''} ${t['lastname'] ?? ''}'
+                .trim(),
             'email': t['email'] ?? '',
             'phone': t['phone'] ?? '',
-            'className': teacherClassMap[t['teacherId']] ?? 'Not Assigned',
+            'className':
+            teacherClassMap[t['teacherId']] ?? 'Not Assigned',
             'subjects': t['subjects']?.length ?? 0,
             'employmentDate': t['employmentDate'],
             'address': t['homeAddress'] ?? 'N/A',
-          })).toList();
+          })
+              .toList();
           _filteredTeachers = List.from(_teachers);
         });
       }
     } catch (e) {
-      print('Error fetching teachers: $e');
+      print('❌ _fetchTeachers: $e');
     }
   }
 
@@ -335,11 +375,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (query.isEmpty) {
         _filteredTeachers = List.from(_teachers);
       } else {
-        _filteredTeachers = _teachers.where((teacher) {
-          final name = teacher['name'].toString().toLowerCase();
-          final email = teacher['email'].toString().toLowerCase();
-          final phone = teacher['phone'].toString().toLowerCase();
-          final className = teacher['className'].toString().toLowerCase();
+        _filteredTeachers = _teachers.where((t) {
+          final name = t['name'].toString().toLowerCase();
+          final email = t['email'].toString().toLowerCase();
+          final phone = t['phone'].toString().toLowerCase();
+          final className = t['className'].toString().toLowerCase();
           return name.contains(query.toLowerCase()) ||
               email.contains(query.toLowerCase()) ||
               phone.contains(query.toLowerCase()) ||
@@ -358,13 +398,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (result['success'] && mounted) {
         final guardiansData = result['data'] as List? ?? [];
         setState(() {
-          _guardians = guardiansData.map((g) => ({
+          _guardians = guardiansData
+              .map((g) => {
             'id': g['guardianId'],
-            'name': '${g['firstname'] ?? ''} ${g['lastname'] ?? ''}'.trim(),
+            'name':
+            '${g['firstname'] ?? ''} ${g['lastname'] ?? ''}'
+                .trim(),
             'email': g['email'] ?? '',
             'phone': g['phone'] ?? '',
             'address': g['homeAddress'] ?? 'N/A',
-          })).toList();
+          })
+              .toList();
           _filteredGuardians = List.from(_guardians);
         });
       }
@@ -379,11 +423,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (query.isEmpty) {
         _filteredGuardians = List.from(_guardians);
       } else {
-        _filteredGuardians = _guardians.where((guardian) {
-          final name = guardian['name'].toString().toLowerCase();
-          final email = guardian['email'].toString().toLowerCase();
-          final phone = guardian['phone'].toString().toLowerCase();
-          final address = guardian['address'].toString().toLowerCase();
+        _filteredGuardians = _guardians.where((g) {
+          final name = g['name'].toString().toLowerCase();
+          final email = g['email'].toString().toLowerCase();
+          final phone = g['phone'].toString().toLowerCase();
+          final address = g['address'].toString().toLowerCase();
           return name.contains(query.toLowerCase()) ||
               email.contains(query.toLowerCase()) ||
               phone.contains(query.toLowerCase()) ||
@@ -399,9 +443,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (query.isEmpty) {
         _filteredClassrooms = List.from(_classrooms);
       } else {
-        _filteredClassrooms = _classrooms.where((classroom) {
-          final name = classroom['name'].toString().toLowerCase();
-          final teacherName = classroom['teacherName'].toString().toLowerCase();
+        _filteredClassrooms = _classrooms.where((c) {
+          final name = c['name'].toString().toLowerCase();
+          final teacherName = c['teacherName'].toString().toLowerCase();
           return name.contains(query.toLowerCase()) ||
               teacherName.contains(query.toLowerCase());
         }).toList();
@@ -409,10 +453,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
-  Future<void> _fetchClassrooms(String token, Map<String, Map<String, dynamic>> expectedRevenueMap) async {
+  Future<void> _fetchClassrooms(
+      String token, Map<String, Map<String, dynamic>> expectedRevenueMap) async {
     try {
-      print('📚 Fetching classrooms...');
-
       final result = await _apiService.getClassroomsBySchoolId(
         token: token,
         schoolId: _currentUser.schoolId,
@@ -420,25 +463,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (result['success'] && mounted) {
         final classroomsData = result['data'] as List? ?? [];
-        print('📚 Found ${classroomsData.length} classrooms');
-
-        final List<Map<String, dynamic>> basicClassrooms = [];
+        final basicClassrooms = <Map<String, dynamic>>[];
 
         for (var c in classroomsData) {
           String teacherName = 'Not Assigned';
           String teacherId = '';
-
           final classroomInfo = expectedRevenueMap[c['classroomId']];
           double feeAmount = classroomInfo?['classFee'] ?? 0.0;
           int studentCount = classroomInfo?['numberOfStudents'] ?? 0;
 
-          print('   📚 ${c['name']}: Fee=₦$feeAmount, Students=$studentCount');
-
           try {
-            final teacherResult = await _apiService.getTeacherByClass(
+            final teacherResult = await _apiService
+                .getTeacherByClass(
               token: token,
               classroomId: c['classroomId'],
-            ).timeout(const Duration(seconds: 5));
+            )
+                .timeout(const Duration(seconds: 5));
 
             if (teacherResult['success'] && teacherResult['data'] != null) {
               final data = teacherResult['data'];
@@ -448,9 +488,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               teacherName = '$firstName $lastName'.trim();
               if (teacherName.isEmpty) teacherName = 'Not Assigned';
             }
-          } catch (e) {
-            print('Error getting teacher for ${c['name']}: $e');
-          }
+          } catch (_) {}
 
           basicClassrooms.add({
             'id': c['classroomId'],
@@ -467,13 +505,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _classrooms = basicClassrooms;
           _filteredClassrooms = List.from(basicClassrooms);
         });
-
-        print('✅ Classrooms loaded: ${_classrooms.length}');
-      } else {
-        print('❌ Failed to fetch classrooms: ${result['message']}');
       }
     } catch (e) {
-      print('❌ Error fetching classrooms: $e');
+      print('❌ _fetchClassrooms: $e');
       setState(() {
         _classrooms = [];
         _filteredClassrooms = [];
@@ -485,13 +519,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
     Map<String, List<Map<String, dynamic>>> tempMap = {};
     for (var guardian in _guardians) {
       try {
-        final result = await _apiService.getGuardianStudentsMapping(
+        final result = await _apiService
+            .getGuardianStudentsMapping(
           token: token,
           guardianId: guardian['id'],
-        ).timeout(const Duration(seconds: 5));
+        )
+            .timeout(const Duration(seconds: 5));
 
         if (result['success'] && result['data'] != null) {
-          tempMap[guardian['id']] = List<Map<String, dynamic>>.from(result['data']);
+          tempMap[guardian['id']] =
+          List<Map<String, dynamic>>.from(result['data']);
         } else {
           tempMap[guardian['id']] = [];
         }
@@ -499,11 +536,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         tempMap[guardian['id']] = [];
       }
     }
-    if (mounted) {
-      setState(() {
-        _guardianStudentsMap = tempMap;
-      });
-    }
+    if (mounted) setState(() => _guardianStudentsMap = tempMap);
   }
 
   Future<void> _fetchGuardianCount(String token) async {
@@ -513,9 +546,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         schoolId: _currentUser.schoolId,
       );
       if (result['success'] && mounted) {
-        setState(() {
-          _guardianCount = result['data'] ?? 0;
-        });
+        setState(() => _guardianCount = result['data'] ?? 0);
       }
     } catch (e) {
       print('Error fetching guardian count: $e');
@@ -531,7 +562,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (result['success'] && mounted) {
         final transactionsData = result['data'] as List? ?? [];
         setState(() {
-          _guardianTransactions = transactionsData.map((t) => ({
+          _guardianTransactions = transactionsData
+              .map((t) => {
             'id': t['transactionId'],
             'guardianId': t['guardianId'],
             'guardianName': t['guardianName'],
@@ -540,12 +572,93 @@ class _AdminDashboardState extends State<AdminDashboard> {
             'status': t['status'] ?? 'completed',
             'date': t['transactionDate'],
             'reference': t['reference'],
-          })).toList();
+          })
+              .toList();
         });
       }
     } catch (e) {
       print('Error fetching guardian transactions: $e');
     }
+  }
+
+  Future<void> _fetchTeacherAttendance() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    if (token == null) return;
+
+    if (_currentUser.schoolId.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _teacherAttendanceError = 'School ID missing';
+        _isLoadingTeacherAttendance = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingTeacherAttendance = true;
+      _teacherAttendanceError = null;
+    });
+
+    try {
+      final result = await _apiService.getAllTeachersTodayAttendance(
+        token: token,
+        schoolId: _currentUser.schoolId,
+      );
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        final records =
+            (result['records'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+        final totalTeachers = _teachers.isNotEmpty
+            ? _teachers.length
+            : (result['summary']?['total'] as int? ?? records.length);
+
+        final presentCount = records.where(_isPresentRecord).length;
+
+        setState(() {
+          _teacherAttendance = records;
+          _teacherAttendanceSummary = {
+            'total': totalTeachers,
+            'present': presentCount,
+            'absent': totalTeachers - presentCount,
+            'late': records.where(_isLateRecord).length,
+          };
+          _isLoadingTeacherAttendance = false;
+        });
+      } else {
+        setState(() {
+          _teacherAttendanceError =
+              result['message'] ?? 'Failed to load attendance';
+          _isLoadingTeacherAttendance = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _teacherAttendanceError = e.toString();
+        _isLoadingTeacherAttendance = false;
+      });
+    }
+  }
+
+  bool _isPresentRecord(Map<String, dynamic> r) {
+    final v = r['status'] ?? r['statusCode'] ?? r['isPresent'] ?? r['present'];
+    if (v is bool) return v;
+    if (v is num) return v == 1;
+    if (v is String) {
+      final s = v.toLowerCase();
+      return s == 'present' || s == '1' || s == 'true' || s == 'clocked in';
+    }
+    final inTime = r['clockInTime'];
+    return inTime != null && inTime.toString().isNotEmpty;
+  }
+
+  bool _isLateRecord(Map<String, dynamic> r) {
+    final v = r['status'] ?? r['statusCode'];
+    if (v is String) return v.toLowerCase() == 'late';
+    return r['isLate'] == true;
   }
 
   Future<void> _fetchAllClassroomFinancialData(
@@ -554,42 +667,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
       String sessionId,
       String termId,
       ) async {
-    if (_classrooms.isEmpty) {
-      print('⚠️ No classrooms to fetch financial data for');
-      return;
-    }
-
-    setState(() {
-      _financialDataLoaded = false;
-    });
-
-    print('💰 Fetching financial data for ${_classrooms.length} classrooms...');
-    print('📅 Using Session: $sessionId, Term: $termId');
+    if (_classrooms.isEmpty) return;
+    setState(() => _financialDataLoaded = false);
 
     for (var classroom in _classrooms) {
-      await _fetchClassroomFinancialData(token, classroom, expectedRevenueMap, sessionId, termId);
+      await _fetchClassroomFinancialData(
+          token, classroom, expectedRevenueMap, sessionId, termId);
     }
 
-    if (mounted) {
-      setState(() {
-        _financialDataLoaded = true;
-      });
-      print('✅ All classroom financial data loaded');
-
-      double totalExpected = 0;
-      double totalPaid = 0;
-      double totalOwed = 0;
-      for (var classroom in _classrooms) {
-        final financialData = _classroomFinancialData[classroom['id']] ?? {};
-        totalExpected += (financialData['expectedRevenue'] as double?) ?? 0;
-        totalPaid += (financialData['totalPaid'] as double?) ?? 0;
-        totalOwed += (financialData['totalOwed'] as double?) ?? 0;
-      }
-      print('📊 Financial Summary:');
-      print('   Total Expected: ₦$totalExpected');
-      print('   Total Paid: ₦$totalPaid');
-      print('   Total Owed: ₦$totalOwed');
-    }
+    if (mounted) setState(() => _financialDataLoaded = true);
   }
 
   Future<void> _fetchClassroomFinancialData(
@@ -600,57 +686,52 @@ class _AdminDashboardState extends State<AdminDashboard> {
       String termId,
       ) async {
     final classroomId = classroom['id'];
-    final classroomName = classroom['name'] ?? 'Unknown';
-
     final expectedData = expectedRevenueMap[classroomId];
-    final expectedRevenue = (expectedData?['expectedRevenue'] as double?) ?? 0.0;
+    final expectedRevenue =
+        (expectedData?['expectedRevenue'] as double?) ?? 0.0;
     final feePerStudent = (expectedData?['classFee'] as double?) ?? 0.0;
     final studentCount = (expectedData?['numberOfStudents'] as int?) ?? 0;
 
-    print('💰 Fetching financial data for $classroomName');
-    print('   Session: $sessionId, Term: $termId');
-    print('   Expected Revenue: ₦$expectedRevenue');
-    print('   Fee per Student: ₦$feePerStudent');
-    print('   Student Count: $studentCount');
-
     try {
-      final paidResult = await _apiService.getTotalAmountPaidInClassByTerm(
+      final paidResult = await _apiService
+          .getTotalAmountPaidInClassByTerm(
         token: token,
         classroomId: classroomId,
         sessionId: sessionId,
         termId: termId,
-      ).timeout(const Duration(seconds: 10));
-
+      )
+          .timeout(const Duration(seconds: 10));
       final totalPaid = (paidResult['data'] ?? 0.0).toDouble();
-      print('   Total Paid from API: ₦$totalPaid');
 
-      final debtResult = await _apiService.getTotalDebtOwedInClassByTerm(
+      final debtResult = await _apiService
+          .getTotalDebtOwedInClassByTerm(
         token: token,
         classroomId: classroomId,
         sessionId: sessionId,
         termId: termId,
-      ).timeout(const Duration(seconds: 10));
-
+      )
+          .timeout(const Duration(seconds: 10));
       final totalOwed = (debtResult['data'] ?? 0.0).toDouble();
-      print('   Total Owed from API: ₦$totalOwed');
 
-      final studentsOwingResult = await _apiService.getStudentsOwingInClassByTerm(
+      final studentsOwingResult = await _apiService
+          .getStudentsOwingInClassByTerm(
         token: token,
         classroomId: classroomId,
         sessionId: sessionId,
         termId: termId,
-      ).timeout(const Duration(seconds: 10));
+      )
+          .timeout(const Duration(seconds: 10));
 
       List<Map<String, dynamic>> studentsOwing = [];
-      if (studentsOwingResult['success'] && studentsOwingResult['data'] != null) {
+      if (studentsOwingResult['success'] &&
+          studentsOwingResult['data'] != null) {
         final data = studentsOwingResult['data'];
-        studentsOwing = List<Map<String, dynamic>>.from(data['students'] ?? []);
-        print('   Students Owing: ${studentsOwing.length}');
+        studentsOwing =
+        List<Map<String, dynamic>>.from(data['students'] ?? []);
       }
 
-      final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
-
-      print('   ✅ Final - Expected: ₦$expectedRevenue, Paid: ₦$totalPaid, Owed: ₦$totalOwed, Rate: ${collectionRate.toStringAsFixed(1)}%');
+      final collectionRate =
+      expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
 
       if (mounted) {
         setState(() {
@@ -666,7 +747,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       }
     } catch (e) {
-      print('❌ Error fetching financial data for $classroomName: $e');
       if (mounted) {
         setState(() {
           _classroomFinancialData[classroomId] = {
@@ -684,52 +764,56 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _refreshData() async {
-    setState(() {
-      _isRefreshing = true;
-    });
+    setState(() => _isRefreshing = true);
     await _fetchDashboardData();
     await _fetchUnreadMessages();
-    setState(() {
-      _isRefreshing = false;
-    });
+    await _fetchTeacherAttendance();
+    setState(() => _isRefreshing = false);
   }
 
-  // ==================== HELPER METHODS ====================
+  // ==================== HELPERS ====================
 
   String _formatCurrency(double amount) {
-    final formatter = NumberFormat.currency(
-      locale: 'en_NG',
-      symbol: '₦',
-      decimalDigits: 2,
-    );
-    return formatter.format(amount);
+    return NumberFormat.currency(
+        locale: 'en_NG', symbol: '₦', decimalDigits: 2)
+        .format(amount);
   }
 
   String _formatCurrencySimple(double amount) {
-    final formatter = NumberFormat.currency(
-      locale: 'en_NG',
-      symbol: '₦',
-      decimalDigits: 0,
-    );
-    return formatter.format(amount);
+    return NumberFormat.currency(
+        locale: 'en_NG', symbol: '₦', decimalDigits: 0)
+        .format(amount);
   }
 
   String _formatNumberWithCommas(int number) {
-    final formatter = NumberFormat('#,###', 'en_US');
-    return formatter.format(number);
+    return NumberFormat('#,###', 'en_US').format(number);
   }
 
   String _formatDate(dynamic dateValue) {
     if (dateValue == null) return 'N/A';
     try {
-      DateTime dateTime = DateTime.parse(dateValue.toString());
+      final dateTime = DateTime.parse(dateValue.toString());
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
     } catch (e) {
       return 'N/A';
     }
   }
 
-  // ==================== NAVIGATION METHODS ====================
+  String _formatTimeOfDay(dynamic t) {
+    if (t == null) return '—';
+    try {
+      final dt = DateTime.parse(t.toString()).toLocal();
+      final h = dt.hour.toString().padLeft(2, '0');
+      final m = dt.minute.toString().padLeft(2, '0');
+      return '$h:$m';
+    } catch (_) {
+      final s = t.toString();
+      if (s.contains(':')) return s.split(':').take(2).join(':');
+      return s;
+    }
+  }
+
+  // ==================== NAVIGATION ====================
 
   void _navigateToMessages() {
     Navigator.push(
@@ -738,7 +822,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     ).then((_) => _fetchUnreadMessages());
   }
 
-  void _startConversationWithUser(String userId, String userRole, String userName, String? userEmail, String? userPhone) {
+  void _startConversationWithUser(String userId, String userRole,
+      String userName, String? userEmail, String? userPhone) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -754,9 +839,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _makePhoneCall(String phoneNumber) async {
-    if (phoneNumber.isEmpty || phoneNumber == 'N/A' || phoneNumber == 'Not available') {
+    if (phoneNumber.isEmpty ||
+        phoneNumber == 'N/A' ||
+        phoneNumber == 'Not available') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available'), backgroundColor: AppColors.warning),
+        const SnackBar(
+            content: Text('Phone number not available'),
+            backgroundColor: AppColors.warning),
       );
       return;
     }
@@ -772,16 +861,244 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
     try {
-      if (await canLaunchUrl(phoneUri)) {
-        await launchUrl(phoneUri);
-      } else {
-        throw 'Could not launch $phoneUri';
-      }
+      await launchUrl(phoneUri, mode: LaunchMode.externalApplication);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: AppColors.error),
+        SnackBar(
+            content: Text('Could not dial $phoneNumber'),
+            backgroundColor: AppColors.error),
       );
     }
+  }
+
+  // ==================== DRAWER ====================
+
+  Widget _buildAppDrawer() {
+    return Drawer(
+      backgroundColor: Colors.white,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFFF7941D), Color(0xFFFFB347)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: Colors.white.withOpacity(0.25),
+                    child: Text(
+                      _currentUser.name.isNotEmpty
+                          ? _currentUser.name[0].toUpperCase()
+                          : 'A',
+                      style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _currentUser.name.isNotEmpty
+                        ? _currentUser.name
+                        : 'Administrator',
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _currentUser.email,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.9)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  _buildDrawerItem(Icons.home_rounded, 'Dashboard', 0),
+                  _buildDrawerItem(Icons.class_rounded, 'Classrooms', 1),
+                  _buildDrawerItem(
+                      Icons.people_alt_outlined, 'Students', 2),
+                  _buildDrawerItem(Icons.person_rounded, 'Teachers', 3),
+                  _buildDrawerItem(
+                      Icons.family_restroom_rounded, 'Guardians', 4),
+                  _buildDrawerItem(Icons.fact_check_outlined,
+                      'Teacher Attendance', 7),
+                  _buildDrawerItem(
+                      Icons.settings_rounded, 'Settings', 8),
+                  const Divider(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.logout_rounded,
+                        color: AppColors.error),
+                    title: const Text('Logout',
+                        style: TextStyle(
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w600)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showLogoutDialog();
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Center(
+                child: Text(
+                  'EduCat Mobile  •  v1.0',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: kTextGrey.withOpacity(0.8)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawerItem(IconData icon, String label, int index) {
+    final selected = _selectedIndex == index;
+    return ListTile(
+      leading: Icon(icon, color: selected ? kOrange : kNavy),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: selected ? kOrange : kNavy,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+      selected: selected,
+      selectedTileColor: kLightOrange,
+      onTap: () {
+        Navigator.pop(context);
+        setState(() => _selectedIndex = index);
+      },
+    );
+  }
+
+  // ==================== ACCOUNT MENU ====================
+
+  void _showAccountMenu() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: kBorder,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: kLightOrange,
+                    child: Text(
+                      _currentUser.name.isNotEmpty
+                          ? _currentUser.name[0].toUpperCase()
+                          : 'A',
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kOrange),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _currentUser.name.isNotEmpty
+                              ? _currentUser.name
+                              : 'Administrator',
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: kNavy),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          _currentUser.email,
+                          style: const TextStyle(
+                              fontSize: 12, color: kTextGrey),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline, color: kNavy),
+              title: const Text('My Profile'),
+              onTap: () {
+                Navigator.pop(context);
+                _showProfileSheet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined, color: kNavy),
+              title: const Text('Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _selectedIndex = 8);
+              },
+            ),
+            ListTile(
+              leading:
+              const Icon(Icons.logout_rounded, color: AppColors.error),
+              title: const Text('Logout',
+                  style: TextStyle(color: AppColors.error)),
+              onTap: () {
+                Navigator.pop(context);
+                _showLogoutDialog();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   // ==================== DETAILS MODALS ====================
@@ -803,20 +1120,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(
-                    student['name'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: kOrange,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(student['name'],
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kOrange),
+                      overflow: TextOverflow.ellipsis),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 24),
-                ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 24)),
               ],
             ),
             const SizedBox(height: 16),
@@ -830,10 +1143,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       _buildInfoRow('Class', student['className']),
                       _buildInfoRow('Teacher', student['teacherName']),
                       _buildInfoRow('Guardian', student['guardianName']),
-                      _buildInfoRow('Guardian Phone', student['guardianPhone']),
-                      _buildInfoRow('Guardian Email', student['guardianEmail']),
+                      _buildInfoRow(
+                          'Guardian Phone', student['guardianPhone']),
+                      _buildInfoRow(
+                          'Guardian Email', student['guardianEmail']),
                       _buildInfoRow('Gender', student['gender']),
-                      _buildInfoRow('Date of Birth', _formatDate(student['dateOfBirth'])),
+                      _buildInfoRow('Date of Birth',
+                          _formatDate(student['dateOfBirth'])),
                     ]),
                     const SizedBox(height: 16),
                     SizedBox(
@@ -852,9 +1168,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         icon: const Icon(Icons.message),
                         label: const Text('Message Guardian'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: kOrange,
-                          foregroundColor: Colors.white,
-                        ),
+                            backgroundColor: kOrange,
+                            foregroundColor: Colors.white),
                       ),
                     ),
                   ],
@@ -884,20 +1199,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(
-                    teacher['name'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: kOrange,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(teacher['name'],
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kOrange),
+                      overflow: TextOverflow.ellipsis),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 24),
-                ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 24)),
               ],
             ),
             const SizedBox(height: 16),
@@ -908,9 +1219,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     _buildInfoCard([
                       _buildInfoRow('Email', teacher['email']),
-                      _buildInfoRow('Phone', teacher['phone'], isClickable: true, onTap: () => _makePhoneCall(teacher['phone'])),
+                      _buildInfoRow('Phone', teacher['phone'],
+                          isClickable: true,
+                          onTap: () => _makePhoneCall(teacher['phone'])),
                       _buildInfoRow('Class', teacher['className']),
-                      _buildInfoRow('Subjects', teacher['subjects'].toString()),
+                      _buildInfoRow(
+                          'Subjects', teacher['subjects'].toString()),
                       _buildInfoRow('Address', teacher['address']),
                     ]),
                     const SizedBox(height: 16),
@@ -930,17 +1244,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             },
                             icon: const Icon(Icons.message),
                             label: const Text('Message'),
-                            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: kOrange,
+                                foregroundColor: Colors.white),
                           ),
                         ),
                         const SizedBox(width: 12),
-                        if (teacher['phone'] != null && teacher['phone'].toString().isNotEmpty)
+                        if (teacher['phone'] != null &&
+                            teacher['phone'].toString().isNotEmpty)
                           Expanded(
                             child: ElevatedButton.icon(
-                              onPressed: () => _makePhoneCall(teacher['phone']),
+                              onPressed: () =>
+                                  _makePhoneCall(teacher['phone']),
                               icon: const Icon(Icons.phone),
                               label: const Text('Call'),
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.success),
                             ),
                           ),
                       ],
@@ -959,7 +1278,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final guardianTransactions = _guardianTransactions
         .where((t) => t['guardianId'] == guardian['id'])
         .toList();
-
     final guardianStudents = _guardianStudentsMap[guardian['id']] ?? [];
 
     showModalBottomSheet(
@@ -978,20 +1296,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(
-                    guardian['name'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: kOrange,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(guardian['name'],
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kOrange),
+                      overflow: TextOverflow.ellipsis),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 24),
-                ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 24)),
               ],
             ),
             const SizedBox(height: 16),
@@ -1002,16 +1316,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     _buildInfoCard([
                       _buildInfoRow('Email', guardian['email']),
-                      _buildInfoRow('Phone', guardian['phone'], isClickable: true, onTap: () => _makePhoneCall(guardian['phone'])),
+                      _buildInfoRow('Phone', guardian['phone'],
+                          isClickable: true,
+                          onTap: () => _makePhoneCall(guardian['phone'])),
                       _buildInfoRow('Address', guardian['address']),
-                      _buildInfoRow('Children', guardianStudents.length.toString()),
+                      _buildInfoRow(
+                          'Children', guardianStudents.length.toString()),
                     ]),
                     const SizedBox(height: 16),
                     if (guardianStudents.isNotEmpty) ...[
-                      const Text(
-                        'Children',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
+                      const Text('Children',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       ...guardianStudents.map((student) => Container(
                         margin: const EdgeInsets.only(bottom: 8),
@@ -1019,44 +1335,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         decoration: BoxDecoration(
                           color: kOrange.withOpacity(0.05),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: kOrange.withOpacity(0.2)),
+                          border: Border.all(
+                              color: kOrange.withOpacity(0.2)),
                         ),
                         child: Row(
                           children: [
                             Container(
                               width: 35,
                               height: 35,
-                              decoration: BoxDecoration(
-                                gradient: AppColors.cardGradient,
-                                shape: BoxShape.circle,
-                              ),
+                              decoration: const BoxDecoration(
+                                  gradient: AppColors.cardGradient,
+                                  shape: BoxShape.circle),
                               child: Center(
                                 child: Text(
-                                  student['firstname']?[0]?.toUpperCase() ?? '?',
+                                  student['firstname']?[0]
+                                      ?.toUpperCase() ??
+                                      '?',
                                   style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment:
+                                CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '${student['firstname'] ?? ''} ${student['lastname'] ?? ''}'.trim(),
+                                    '${student['firstname'] ?? ''} ${student['lastname'] ?? ''}'
+                                        .trim(),
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                        fontWeight: FontWeight.bold),
                                   ),
                                   Text(
                                     'Admission: ${student['studentNo'] ?? 'N/A'}',
                                     style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary,
-                                    ),
+                                        fontSize: 11,
+                                        color:
+                                        AppColors.textSecondary),
                                   ),
                                 ],
                               ),
@@ -1066,26 +1384,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       )),
                     ],
                     const SizedBox(height: 16),
-                    Text(
-                      'Transactions (${guardianTransactions.length})',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Transactions (${guardianTransactions.length})',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     guardianTransactions.isEmpty
                         ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(32),
-                        child: Text('No transactions found'),
-                      ),
-                    )
+                        child: Padding(
+                            padding: EdgeInsets.all(32),
+                            child: Text('No transactions found')))
                         : ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: guardianTransactions.length,
-                      itemBuilder: (context, index) {
-                        final transaction = guardianTransactions[index];
-                        return _buildTransactionCard(transaction);
-                      },
+                      itemBuilder: (context, index) =>
+                          _buildTransactionCard(
+                              guardianTransactions[index]),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -1104,17 +1418,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             },
                             icon: const Icon(Icons.message),
                             label: const Text('Message'),
-                            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: kOrange,
+                                foregroundColor: Colors.white),
                           ),
                         ),
                         const SizedBox(width: 12),
-                        if (guardian['phone'] != null && guardian['phone'].toString().isNotEmpty)
+                        if (guardian['phone'] != null &&
+                            guardian['phone'].toString().isNotEmpty)
                           Expanded(
                             child: ElevatedButton.icon(
-                              onPressed: () => _makePhoneCall(guardian['phone']),
+                              onPressed: () =>
+                                  _makePhoneCall(guardian['phone']),
                               icon: const Icon(Icons.phone),
                               label: const Text('Call'),
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.success),
                             ),
                           ),
                       ],
@@ -1131,7 +1450,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   void _showClassroomDetails(Map<String, dynamic> classroom) {
     final financialData = _classroomFinancialData[classroom['id']] ?? {};
-    final studentsOwing = List<Map<String, dynamic>>.from(financialData['studentsOwing'] ?? []);
+    final studentsOwing =
+    List<Map<String, dynamic>>.from(financialData['studentsOwing'] ?? []);
     final studentCount = financialData['studentCount'] ?? 0;
     final feeAmount = classroom['feeAmount'] ?? 0.0;
     final expectedRevenue = financialData['expectedRevenue'] ?? 0.0;
@@ -1154,20 +1474,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(
-                    classroom['name'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: kOrange,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(classroom['name'],
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kOrange),
+                      overflow: TextOverflow.ellipsis),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, size: 24),
-                ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 24)),
               ],
             ),
             const SizedBox(height: 16),
@@ -1178,8 +1494,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     _buildInfoCard([
                       _buildInfoRow('Teacher', classroom['teacherName']),
-                      _buildInfoRow('Total Students', studentCount.toString()),
-                      _buildInfoRow('Fee per Student', _formatCurrency(feeAmount)),
+                      _buildInfoRow(
+                          'Total Students', studentCount.toString()),
+                      _buildInfoRow(
+                          'Fee per Student', _formatCurrency(feeAmount)),
                     ]),
                     const SizedBox(height: 16),
                     _buildFinancialSummaryCard(
@@ -1190,13 +1508,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       studentCount: studentCount,
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      'Students Owing (${studentsOwing.length})',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text('Students Owing (${studentsOwing.length})',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     studentsOwing.isEmpty
                         ? const Center(
@@ -1204,7 +1518,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         padding: EdgeInsets.all(32),
                         child: Column(
                           children: [
-                            Icon(Icons.check_circle, size: 48, color: AppColors.success),
+                            Icon(Icons.check_circle,
+                                size: 48, color: AppColors.success),
                             SizedBox(height: 8),
                             Text('No students are owing!'),
                           ],
@@ -1215,10 +1530,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: studentsOwing.length,
-                      itemBuilder: (context, index) {
-                        final student = studentsOwing[index];
-                        return _buildStudentOwingCard(student);
-                      },
+                      itemBuilder: (context, index) =>
+                          _buildStudentOwingCard(
+                              studentsOwing[index]),
                     ),
                   ],
                 ),
@@ -1230,7 +1544,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, {bool isClickable = false, VoidCallback? onTap}) {
+  Widget _buildInfoRow(String label, String value,
+      {bool isClickable = false, VoidCallback? onTap}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
@@ -1240,13 +1555,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           children: [
             SizedBox(
               width: 80,
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
-              ),
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
             ),
             Expanded(
               child: Text(
@@ -1259,8 +1570,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
             ),
-            if (isClickable && value.isNotEmpty && value != 'N/A' && value != 'Not available')
-              Icon(Icons.phone, size: 16, color: kOrange),
+            if (isClickable &&
+                value.isNotEmpty &&
+                value != 'N/A' &&
+                value != 'Not available')
+              const Icon(Icons.phone, size: 16, color: kOrange),
           ],
         ),
       ),
@@ -1277,9 +1591,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         border: Border.all(color: kOrange.withOpacity(0.2)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      ),
+          crossAxisAlignment: CrossAxisAlignment.start, children: children),
     );
   }
 
@@ -1310,8 +1622,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               shape: BoxShape.circle,
             ),
             child: Icon(
-              transaction['type'] == 'payment' ? Icons.payment : Icons.receipt,
-              color: transaction['type'] == 'payment' ? AppColors.success : AppColors.warning,
+              transaction['type'] == 'payment'
+                  ? Icons.payment
+                  : Icons.receipt,
+              color: transaction['type'] == 'payment'
+                  ? AppColors.success
+                  : AppColors.warning,
             ),
           ),
           const SizedBox(width: 12),
@@ -1320,16 +1636,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  transaction['type']?.toUpperCase() ?? 'TRANSACTION',
+                  transaction['type']?.toString().toUpperCase() ??
+                      'TRANSACTION',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
-                    color: transaction['type'] == 'payment' ? AppColors.success : AppColors.warning,
+                    color: transaction['type'] == 'payment'
+                        ? AppColors.success
+                        : AppColors.warning,
                   ),
                 ),
                 Text(
-                  'Ref: ${transaction['reference']?.substring(0, 8) ?? 'N/A'}...',
-                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  'Ref: ${transaction['reference']?.toString().substring(0, 8) ?? 'N/A'}...',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
                 ),
               ],
             ),
@@ -1342,12 +1662,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
-                  color: transaction['type'] == 'payment' ? AppColors.success : AppColors.warning,
+                  color: transaction['type'] == 'payment'
+                      ? AppColors.success
+                      : AppColors.warning,
                 ),
               ),
               Text(
                 _formatDate(transaction['date']),
-                style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                style: const TextStyle(
+                    fontSize: 10, color: AppColors.textSecondary),
               ),
             ],
           ),
@@ -1363,7 +1686,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     double feeAmount = 0.0,
     int studentCount = 0,
   }) {
-    final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
+    final collectionRate =
+    expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
 
     return Container(
       width: double.infinity,
@@ -1376,10 +1700,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Financial Summary',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
+          const Text('Financial Summary',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1389,27 +1711,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.info.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.info.withOpacity(0.2)),
+                    border:
+                    Border.all(color: AppColors.info.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
-                      Text(
-                        'Expected',
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                      ),
+                      const Text('Expected',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary)),
                       const SizedBox(height: 2),
-                      Text(
-                        _formatCurrencySimple(expectedRevenue),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.info,
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _formatCurrencySimple(expectedRevenue),
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.info),
                         ),
                       ),
                       if (feeAmount > 0 && studentCount > 0)
                         Text(
-                          '${_formatCurrencySimple(feeAmount)} × ${_formatNumberWithCommas(studentCount)} students',
-                          style: const TextStyle(fontSize: 9, color: AppColors.textSecondary),
+                          '${_formatCurrencySimple(feeAmount)} × ${_formatNumberWithCommas(studentCount)}',
+                          style: const TextStyle(
+                              fontSize: 9,
+                              color: AppColors.textSecondary),
                         ),
                     ],
                   ),
@@ -1422,21 +1749,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.success.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.success.withOpacity(0.2)),
+                    border: Border.all(
+                        color: AppColors.success.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
-                      Text(
-                        'Paid',
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                      ),
+                      const Text('Paid',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary)),
                       const SizedBox(height: 2),
-                      Text(
-                        _formatCurrencySimple(totalPaid),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.success,
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _formatCurrencySimple(totalPaid),
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.success),
                         ),
                       ),
                     ],
@@ -1450,21 +1780,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: BoxDecoration(
                     color: AppColors.error.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.error.withOpacity(0.2)),
+                    border:
+                    Border.all(color: AppColors.error.withOpacity(0.2)),
                   ),
                   child: Column(
                     children: [
-                      Text(
-                        'Owed',
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                      ),
+                      const Text('Owed',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary)),
                       const SizedBox(height: 2),
-                      Text(
-                        _formatCurrencySimple(totalOwed),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.error,
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _formatCurrencySimple(totalOwed),
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.error),
                         ),
                       ),
                     ],
@@ -1474,34 +1807,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ],
           ),
           const SizedBox(height: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Collection Rate', style: TextStyle(fontSize: 12)),
-                  Text(
-                    '${collectionRate.toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      color: collectionRate >= 70 ? AppColors.success : AppColors.warning,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: collectionRate / 100,
-                  backgroundColor: AppColors.greyLight,
-                  color: collectionRate >= 70 ? AppColors.success : AppColors.warning,
-                  minHeight: 6,
+              const Text('Collection Rate',
+                  style: TextStyle(fontSize: 12)),
+              Text(
+                '${collectionRate.toStringAsFixed(1)}%',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: collectionRate >= 70
+                      ? AppColors.success
+                      : AppColors.warning,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: collectionRate / 100,
+              backgroundColor: AppColors.greyLight,
+              color: collectionRate >= 70
+                  ? AppColors.success
+                  : AppColors.warning,
+              minHeight: 6,
+            ),
           ),
         ],
       ),
@@ -1532,14 +1865,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
             child: Center(
               child: Text(
-                student['studentName'] != null && student['studentName'].isNotEmpty
+                student['studentName'] != null &&
+                    student['studentName'].isNotEmpty
                     ? student['studentName'][0].toUpperCase()
                     : '?',
                 style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.error,
-                ),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.error),
               ),
             ),
           ),
@@ -1551,14 +1884,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Text(
                   student['studentName'] ?? 'Unknown Student',
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+                      fontWeight: FontWeight.bold, fontSize: 14),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   'Fee: ${_formatCurrencySimple(classFee)} • Paid: ${_formatCurrencySimple(totalPaid)}',
-                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -1566,22 +1899,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text(
-                'Owing',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.error,
-                ),
-              ),
+              const Text('Owing',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.error)),
               const SizedBox(height: 2),
               Text(
                 _formatCurrencySimple(amountOwed),
                 style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.error,
-                ),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.error),
               ),
             ],
           ),
@@ -1590,7 +1919,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ==================== UI BUILD METHODS ====================
+  // ==================== UI BUILD ====================
 
   @override
   Widget build(BuildContext context) {
@@ -1600,7 +1929,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _isDesktop = screenWidth >= 1200;
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: kBg,
+      drawer: _buildAppDrawer(),
       body: SafeArea(
         child: _isLoading
             ? const Center(child: CircularProgressIndicator(color: kOrange))
@@ -1615,9 +1946,77 @@ class _AdminDashboardState extends State<AdminDashboard> {
               Expanded(
                 child: _selectedIndex == 0
                     ? _buildHomeScreen()
-                    : _buildScreenWithBackButton(_selectedIndex),
+                    : _buildScreenForIndex(_selectedIndex),
               ),
             ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: (_isLoading || _errorMessage != null)
+          ? null
+          : _buildBottomNav(),
+    );
+  }
+
+  Widget _buildBottomNav() {
+    final items = [
+      _NavItem(icon: Icons.home_rounded, label: 'Home', index: 0),
+      _NavItem(icon: Icons.class_rounded, label: 'Classes', index: 1),
+      _NavItem(
+          icon: Icons.people_alt_outlined, label: 'Students', index: 2),
+      _NavItem(
+          icon: Icons.fact_check_outlined, label: 'Attendance', index: 7),
+      _NavItem(icon: Icons.more_horiz_rounded, label: 'More', index: 6),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: const Border(top: BorderSide(color: kBorder)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: items.map((item) {
+              final selected = _selectedIndex == item.index;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedIndex = item.index),
+                behavior: HitTestBehavior.opaque,
+                child: SizedBox(
+                  width: 64,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(item.icon,
+                          color: selected ? kOrange : kTextGrey, size: 24),
+                      const SizedBox(height: 2),
+                      Text(
+                        item.label,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          color: selected ? kOrange : kTextGrey,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         ),
       ),
@@ -1626,58 +2025,55 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Widget _buildErrorView() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 64, color: AppColors.error),
-          const SizedBox(height: 16),
-          Text(_errorMessage!, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _fetchDashboardData,
-            style: ElevatedButton.styleFrom(backgroundColor: kOrange, foregroundColor: Colors.white),
-            child: const Text('Retry'),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline,
+                size: 64, color: AppColors.error),
+            const SizedBox(height: 16),
+            Text(_errorMessage!,
+                style: const TextStyle(color: AppColors.textSecondary),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _fetchDashboardData,
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: kOrange, foregroundColor: Colors.white),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Top Bar ────────────────────────────────────────────────────────────────
-
   Widget _buildTopBar() {
-    // Show back button if not on home screen
-    final bool showBackButton = _selectedIndex != 0;
-
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          // Back Button (if not on home)
-          if (showBackButton)
-            IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: kOrange),
-              onPressed: () => setState(() => _selectedIndex = 0),
-              tooltip: 'Back to Dashboard',
-            ),
-
-          // Menu (only on home)
-          if (!showBackButton)
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: kBg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: kBorder),
+          // 🔶 Burger icon — opens drawer
+          Material(
+            color: kBg,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: kBorder),
+                ),
+                child: const Icon(Icons.menu, color: kNavy, size: 20),
               ),
-              child: const Icon(Icons.menu, color: kNavy, size: 20),
             ),
-
+          ),
           const Spacer(),
-
-          // Logo
           Column(
             children: [
               Row(
@@ -1688,21 +2084,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     text: const TextSpan(
                       children: [
                         TextSpan(
-                          text: 'Edu',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: kNavy,
-                          ),
-                        ),
+                            text: 'Edu',
+                            style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: kNavy)),
                         TextSpan(
-                          text: 'Cat',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: kOrange,
-                          ),
-                        ),
+                            text: 'Cat',
+                            style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: kOrange)),
                       ],
                     ),
                   ),
@@ -1714,98 +2106,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-
           const Spacer(),
-
-          // Screen Title (when back button is shown)
-          if (showBackButton)
-            Text(
-              _getScreenTitle(),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: kNavy,
+          // Notifications
+          Stack(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: kBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: kBorder),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.notifications_outlined,
+                      color: kNavy, size: 20),
+                  onPressed: _navigateToMessages,
+                  padding: EdgeInsets.zero,
+                ),
               ),
-            ),
-
-          if (!showBackButton)
-            Stack(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: kBg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: kBorder),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.notifications_outlined, color: kNavy, size: 20),
-                    onPressed: _navigateToMessages,
-                    padding: EdgeInsets.zero,
+              if (_unreadMessageCount > 0)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                        color: kRed, shape: BoxShape.circle),
                   ),
                 ),
-                if (_unreadMessageCount > 0)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: kRed,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-
-          if (!showBackButton) const SizedBox(width: 10),
-
-          // Avatar (only on home)
-          if (!showBackButton)
-            CircleAvatar(
+            ],
+          ),
+          const SizedBox(width: 10),
+          // 🔶 Avatar — opens account menu
+          GestureDetector(
+            onTap: _showAccountMenu,
+            child: CircleAvatar(
               radius: 20,
               backgroundColor: kLightOrange,
-              child: Icon(Icons.person, color: kOrange, size: 22),
+              child: Text(
+                _currentUser.name.isNotEmpty
+                    ? _currentUser.name[0].toUpperCase()
+                    : 'A',
+                style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: kOrange),
+              ),
             ),
-
-          // Logout button (only when back button is shown)
-          if (showBackButton)
-            IconButton(
-              icon: const Icon(Icons.logout_rounded, color: AppColors.error),
-              onPressed: _showLogoutDialog,
-            ),
+          ),
         ],
       ),
-    );
-  }
-
-  String _getScreenTitle() {
-    switch (_selectedIndex) {
-      case 1: return 'Classrooms';
-      case 2: return 'Students';
-      case 3: return 'Teachers';
-      case 4: return 'Guardians';
-      case 5: return 'Messages';
-      case 6: return 'Settings';
-      default: return '';
-    }
-  }
-
-  Widget _buildScreenWithBackButton(int index) {
-    // Wrap each screen with a back button handler
-    return GestureDetector(
-      onHorizontalDragEnd: (details) {
-        // Swipe right to go back
-        if (details.primaryVelocity != null && details.primaryVelocity! > 0) {
-          setState(() {
-            _selectedIndex = 0;
-          });
-        }
-      },
-      child: _buildScreenForIndex(index),
     );
   }
 
@@ -1831,11 +2183,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             bottom: -10,
             child: Opacity(
               opacity: 0.2,
-              child: Icon(
-                Icons.account_balance,
-                size: 140,
-                color: Colors.white,
-              ),
+              child: const Icon(Icons.account_balance,
+                  size: 140, color: Colors.white),
             ),
           ),
           Column(
@@ -1846,10 +2195,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   Text(
                     'Hello, ${_currentUser.name.split(' ').first}!',
                     style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500),
                   ),
                   const Text(' 👋', style: TextStyle(fontSize: 16)),
                 ],
@@ -1858,23 +2206,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const Text(
                 'School Administrator!',
                 style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                ),
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
               ),
               const SizedBox(height: 6),
               Text(
                 "Here's what's happening at ${_currentUser.schoolName} today.",
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white,
-                  height: 1.4,
-                ),
+                style: const TextStyle(
+                    fontSize: 13, color: Colors.white, height: 1.4),
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.25),
                   borderRadius: BorderRadius.circular(20),
@@ -1882,15 +2227,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.calendar_today, color: Colors.white, size: 14),
+                    const Icon(Icons.calendar_today,
+                        color: Colors.white, size: 14),
                     const SizedBox(width: 6),
                     Text(
                       _getCurrentSessionId(),
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13),
                     ),
                   ],
                 ),
@@ -1902,37 +2247,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ── Section Header ─────────────────────────────────────────────────────────
-
   Widget _buildSectionHeader(String title, String? actionLabel) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-            color: kNavy,
-          ),
-        ),
+        Text(title,
+            style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800, color: kNavy)),
         if (actionLabel != null)
           GestureDetector(
-            onTap: actionLabel == 'View All' ? () => setState(() => _selectedIndex = 1) : null,
-            child: Text(
-              actionLabel,
-              style: const TextStyle(
-                color: kPurple,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
-            ),
+            onTap: actionLabel == 'View All'
+                ? () => setState(() => _selectedIndex = 1)
+                : null,
+            child: Text(actionLabel,
+                style: const TextStyle(
+                    color: kPurple,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14)),
           ),
       ],
     );
   }
 
-  // ── Stats Grid ─────────────────────────────────────────────────────────────
+  // ── Stats Grid (now tappable) ──────────────────────────────────────────────
 
   Widget _buildStatsGrid() {
     return Column(
@@ -1947,17 +2284,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 count: _students.length.toString(),
                 label: 'Students',
                 subLabel: 'Across all classes',
+                onTap: () => setState(() => _selectedIndex = 2),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _buildStatCard(
-                icon: Icons.person,
+                icon: Icons.fact_check_outlined,
                 iconColor: kBlue,
                 iconBg: kLightBlue,
-                count: _teachers.length.toString(),
-                label: 'Teachers',
-                subLabel: 'Teaching your children',
+                count: '${_teacherAttendanceSummary['present'] ?? 0}/'
+                    '${_teacherAttendanceSummary['total'] ?? _teachers.length}',
+                label: 'Teachers Present',
+                subLabel: 'Today',
+                onTap: () => setState(() => _selectedIndex = 7),
               ),
             ),
           ],
@@ -1973,6 +2313,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 count: _guardianCount.toString(),
                 label: 'Guardians',
                 subLabel: 'Linked to your children',
+                onTap: () => setState(() => _selectedIndex = 4),
               ),
             ),
             const SizedBox(width: 12),
@@ -1984,6 +2325,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 count: _classrooms.length.toString(),
                 label: 'Classrooms',
                 subLabel: 'Your children are in',
+                onTap: () => setState(() => _selectedIndex = 1),
               ),
             ),
           ],
@@ -1999,62 +2341,66 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required String count,
     required String label,
     required String subLabel,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBorder),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: iconBg,
-              borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kBorder),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                  color: iconBg, borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: iconColor, size: 22),
             ),
-            child: Icon(icon, color: iconColor, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  count,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: kNavy,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(count,
+                        style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: kNavy),
+                        maxLines: 1),
                   ),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: kNavy,
-                  ),
-                ),
-                Text(
-                  subLabel,
-                  style: const TextStyle(fontSize: 11, color: kTextGrey),
-                ),
-              ],
+                  Text(label,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: kNavy),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  Text(subLabel,
+                      style: const TextStyle(
+                          fontSize: 11, color: kTextGrey),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
             ),
-          ),
-          const Icon(Icons.chevron_right, color: kTextGrey, size: 18),
-        ],
+            Icon(Icons.chevron_right,
+                color: onTap != null ? kOrange : kTextGrey, size: 18),
+          ],
+        ),
       ),
     );
   }
@@ -2073,7 +2419,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       totalOwed += (financialData['totalOwed'] as double?) ?? 0;
     }
 
-    double collectionRate = totalExpected > 0 ? (totalPaid / totalExpected) * 100 : 0;
+    double collectionRate =
+    totalExpected > 0 ? (totalPaid / totalExpected) * 100 : 0;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -2083,10 +2430,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         border: Border.all(color: kBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -2098,35 +2444,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: kLightOrange,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.wallet, color: kOrange, size: 18),
+                    color: kLightOrange,
+                    borderRadius: BorderRadius.circular(10)),
+                child:
+                const Icon(Icons.wallet, color: kOrange, size: 18),
               ),
               const SizedBox(width: 10),
-              const Text(
-                'Financial Overview',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: kNavy,
-                ),
+              const Expanded(
+                child: Text('Financial Overview',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: kNavy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
               ),
-              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  border: Border.all(color: kOrange),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${collectionRate.toStringAsFixed(0)}% Collection',
-                  style: TextStyle(
-                    color: kOrange,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                    border: Border.all(color: kOrange),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text('${collectionRate.toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                        color: kOrange,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -2167,26 +2510,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          const Divider(color: kBorder, height: 1),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Outstanding Balance: ${_formatCurrencySimple(totalOwed)}',
-                style: const TextStyle(fontSize: 12, color: kTextGrey),
-              ),
-              Text(
-                '${collectionRate.toStringAsFixed(0)}% Paid',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: collectionRate >= 70 ? kGreen : kOrange,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
@@ -2203,24 +2526,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
+          color: bgColor, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 11, color: kTextGrey),
-          ),
+          Text(label,
+              style: const TextStyle(fontSize: 11, color: kTextGrey),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
           const SizedBox(height: 4),
-          Text(
-            amount,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: amountColor,
-            ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(amount,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: amountColor),
+                maxLines: 1),
           ),
           const SizedBox(height: 8),
           Icon(icon, color: iconColor, size: 20),
@@ -2237,8 +2560,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       {'icon': Icons.person, 'label': 'Teachers', 'color': kBlue, 'bg': kLightBlue, 'index': 3},
       {'icon': Icons.class_, 'label': 'Classes', 'color': kPurple, 'bg': kLightPurple, 'index': 1},
       {'icon': Icons.family_restroom, 'label': 'Guardians', 'color': kGreen, 'bg': kLightGreen, 'index': 4},
-      {'icon': Icons.message, 'label': 'Messages', 'color': kOrange, 'bg': kLightOrange, 'index': 5},
-      {'icon': Icons.settings, 'label': 'Settings', 'color': kNavy, 'bg': kLightOrange, 'index': 6},
+      {'icon': Icons.fact_check_outlined, 'label': 'Attendance', 'color': kBlue, 'bg': kLightBlue, 'index': 7},
+      {'icon': Icons.settings, 'label': 'Settings', 'color': kNavy, 'bg': kLightOrange, 'index': 8},
     ];
 
     return Wrap(
@@ -2246,16 +2569,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       runSpacing: 8,
       children: actions.map((action) {
         return GestureDetector(
-          onTap: () {
-            final index = action['index'] as int;
-            if (index == 5) {
-              _navigateToMessages();
-            } else {
-              setState(() {
-                _selectedIndex = index;
-              });
-            }
-          },
+          onTap: () => setState(() {
+            _selectedIndex = action['index'] as int;
+          }),
           child: Column(
             children: [
               Container(
@@ -2264,26 +2580,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 decoration: BoxDecoration(
                   color: (action['bg'] as Color),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: (action['color'] as Color).withOpacity(0.2), width: 1),
+                  border: Border.all(
+                      color: (action['color'] as Color).withOpacity(0.2),
+                      width: 1),
                 ),
-                child: Icon(
-                  action['icon'] as IconData,
-                  color: action['color'] as Color,
-                  size: 28,
-                ),
+                child: Icon(action['icon'] as IconData,
+                    color: action['color'] as Color, size: 28),
               ),
               const SizedBox(height: 6),
               SizedBox(
                 width: 70,
-                child: Text(
-                  action['label'] as String,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: kNavy,
-                  ),
-                ),
+                child: Text(action['label'] as String,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: kNavy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
               ),
             ],
           ),
@@ -2294,6 +2608,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ── Classroom List ─────────────────────────────────────────────────────────
 
+  // Widget _buildClassroomList() {
+  //   if (_classrooms.isEmpty) {
+  //     return Container(
+  //       padding: const EdgeInsets.all(40),
+  //       decoration: BoxDecoration(
+  //         color: Colors.white,
+  //         borderRadius: BorderRadius.circular(16),
+  //         border: Border.all(color: kBorder),
+  //       ),
+  //       child: const Center(
+  //         child: Text('No classrooms available',
+  //             style: TextStyle(color: kTextGrey)),
+  //       ),
+  //     );
+  //   }
+  //
+  //   return Column(
+  //     children: _classrooms.map((classroom) {
+  //       final financialData =
+  //           _classroomFinancialData[classroom['id']] ?? {};
+  //       final expectedRevenue =
+  //       (financialData['expectedRevenue'] ?? 0.0).toDouble();
+  //       final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
+  //       final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
+  //       final studentCount = financialData['studentCount'] ?? 0;
+  //       final collectionRate =
+  //       expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
+  //
+  //       return _buildClassroomItem(
+  //         color: kOrange,
+  //         className: classroom['name'],
+  //         students: '$studentCount student${studentCount != 1 ? 's' : ''}',
+  //         paid: _formatCurrencySimple(totalPaid),
+  //         owed: _formatCurrencySimple(totalOwed),
+  //         percent: '${collectionRate.toStringAsFixed(0)}%',
+  //         onTap: () => _showClassroomDetails(classroom),
+  //       );
+  //     }).toList(),
+  //   );
+  // }
   Widget _buildClassroomList() {
     if (_classrooms.isEmpty) {
       return Container(
@@ -2315,25 +2669,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Column(
       children: _classrooms.map((classroom) {
         final financialData = _classroomFinancialData[classroom['id']] ?? {};
-        final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
+        final expectedRevenue =
+        (financialData['expectedRevenue'] ?? 0.0).toDouble();
         final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
-        final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
         final studentCount = financialData['studentCount'] ?? 0;
-        final collectionRate = expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
+        final collectionRate =
+        expectedRevenue > 0 ? (totalPaid / expectedRevenue) * 100 : 0;
 
         return _buildClassroomItem(
           color: kOrange,
           className: classroom['name'],
           students: '$studentCount student${studentCount != 1 ? 's' : ''}',
           paid: _formatCurrencySimple(totalPaid),
-          owed: _formatCurrencySimple(totalOwed),
+          owed: '', // no longer shown
           percent: '${collectionRate.toStringAsFixed(0)}%',
           onTap: () => _showClassroomDetails(classroom),
         );
       }).toList(),
     );
   }
-
   Widget _buildClassroomItem({
     required Color color,
     required String className,
@@ -2346,6 +2700,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -2353,10 +2708,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           border: Border.all(color: kBorder),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 6,
+                offset: const Offset(0, 2)),
           ],
         ),
         child: Row(
@@ -2364,54 +2718,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Container(
               width: 44,
               height: 44,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.school, color: Colors.white, size: 22),
+              decoration:
+              BoxDecoration(color: color, shape: BoxShape.circle),
+              child:
+              const Icon(Icons.school, color: Colors.white, size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    className,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: kNavy,
-                    ),
-                  ),
+                  Text(className,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: kNavy),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                   Row(
                     children: [
-                      const Icon(Icons.person_outline, size: 12, color: kTextGrey),
+                      const Icon(Icons.person_outline,
+                          size: 12, color: kTextGrey),
                       const SizedBox(width: 3),
-                      Text(
-                        students,
-                        style: const TextStyle(fontSize: 12, color: kTextGrey),
+                      Expanded(
+                        child: Text(students,
+                            style: const TextStyle(
+                                fontSize: 12, color: kTextGrey),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text(
-                        'Paid: $paid',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: kGreen,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      Flexible(
+                        child: Text('Paid: $paid',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: kGreen,
+                                fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
                       ),
                       const SizedBox(width: 12),
-                      Text(
-                        'Owed: $owed',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: kRed,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      Flexible(
+                        child: Text('Owed: $owed',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: kRed,
+                                fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
                       ),
                     ],
                   ),
@@ -2422,16 +2780,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                border: Border.all(color: kOrange, width: 1.5),
-                shape: BoxShape.circle,
-              ),
+                  border: Border.all(color: kOrange, width: 1.5),
+                  shape: BoxShape.circle),
               child: Center(
-                child: Text(
-                  percent,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: kOrange,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Text(percent,
+                        style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: kOrange)),
                   ),
                 ),
               ),
@@ -2439,81 +2799,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             const SizedBox(width: 8),
             const Icon(Icons.chevron_right, color: kTextGrey, size: 18),
           ],
-        ),
-      ),
-    );
-  }
-
-  // ── Bottom Nav ─────────────────────────────────────────────────────────────
-
-  Widget _buildBottomNav() {
-    final items = [
-      _NavItem(icon: Icons.home_rounded, label: 'Home', index: 0),
-      _NavItem(icon: Icons.class_rounded, label: 'Classes', index: 1),
-      _NavItem(icon: Icons.people_alt_outlined, label: 'Students', index: 2),
-      _NavItem(icon: Icons.person_rounded, label: 'Teachers', index: 3),
-      _NavItem(icon: Icons.family_restroom_rounded, label: 'Guardians', index: 4),
-      _NavItem(icon: Icons.message_rounded, label: 'Messages', index: 5, isMessages: true),
-      _NavItem(icon: Icons.settings_rounded, label: 'Settings', index: 6),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: kBorder)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(items.length, (i) {
-              final item = items[i];
-              final selected = _selectedIndex == item.index;
-              return GestureDetector(
-                onTap: () {
-                  if (item.isMessages == true) {
-                    _navigateToMessages();
-                  } else {
-                    setState(() {
-                      _selectedIndex = item.index;
-                    });
-                  }
-                },
-                behavior: HitTestBehavior.opaque,
-                child: SizedBox(
-                  width: 50,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        item.icon,
-                        color: selected ? kOrange : kTextGrey,
-                        size: 24,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        item.label,
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                          color: selected ? kOrange : kTextGrey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ),
         ),
       ),
     );
@@ -2562,18 +2847,112 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 5:
         return _buildMessagesScreen();
       case 6:
+        return _buildMoreScreen();
+      case 7:
+        return _buildTeacherAttendanceScreen();
+      case 8:
         return _buildSettingsScreen();
       default:
         return _buildHomeScreen();
     }
   }
 
+  // ── More Screen ────────────────────────────────────────────────────────────
+
+  Widget _buildMoreScreen() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(_isMobile ? 12 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('More Options',
+              style: TextStyle(
+                  fontSize: _isMobile ? 22 : 26,
+                  fontWeight: FontWeight.bold,
+                  color: kNavy)),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Column(
+              children: [
+                _buildMoreTile(Icons.person, 'Teachers',
+                    'View all teachers', () => setState(() => _selectedIndex = 3)),
+                _buildMoreTile(Icons.family_restroom, 'Guardians',
+                    'View all guardians', () => setState(() => _selectedIndex = 4)),
+                _buildMoreTile(Icons.message, 'Messages',
+                    'View all messages', _navigateToMessages),
+                _buildMoreTile(Icons.settings, 'Settings', 'App settings',
+                        () => setState(() => _selectedIndex = 8)),
+                _buildMoreTile(Icons.logout, 'Logout',
+                    'Sign out of your account', _showLogoutDialog,
+                    isDestructive: true),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMoreTile(
+      IconData icon,
+      String title,
+      String subtitle,
+      VoidCallback onTap, {
+        bool isDestructive = false,
+      }) {
+    return Column(
+      children: [
+        ListTile(
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: (isDestructive ? AppColors.error : kOrange)
+                  .withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: (isDestructive ? AppColors.error : kOrange)
+                    .withOpacity(0.2),
+              ),
+            ),
+            child: Icon(icon,
+                color: isDestructive ? AppColors.error : kOrange, size: 20),
+          ),
+          title: Text(title,
+              style:
+              TextStyle(color: isDestructive ? AppColors.error : kNavy)),
+          subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
+          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          onTap: onTap,
+        ),
+        const Divider(height: 1),
+      ],
+    );
+  }
+
+  // ── Classrooms Screen ──────────────────────────────────────────────────────
+
   Widget _buildClassroomsScreen() {
     if (_classrooms.isEmpty) {
-      return _buildEmptyScreen('No classrooms found', 'Classrooms will appear here once added', Icons.class_rounded);
+      return _buildEmptyScreen(
+        'No classrooms found',
+        'Classrooms will appear here once added',
+        Icons.class_rounded,
+      );
     }
 
-    int classroomsColumns = _isMobile ? 1 : (_isTablet ? 2 : 3);
+    // 🔶 Now 2 per row on mobile (was 1)
+    final int classroomsColumns = _isMobile ? 2 : (_isTablet ? 3 : 4);
 
     return Column(
       children: [
@@ -2597,27 +2976,43 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate:
+                SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: classroomsColumns,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: _isMobile ? 1.2 : 1.3,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  // Taller ratio (shorter cards) — was 1.2/1.3
+                  childAspectRatio: _isMobile ? 2.6 : 3.0,
                 ),
-                itemCount: _isSearchingClassrooms ? _filteredClassrooms.length : _classrooms.length,
+                itemCount: _isSearchingClassrooms
+                    ? _filteredClassrooms.length
+                    : _classrooms.length,
                 itemBuilder: (context, index) {
-                  final classroom = _isSearchingClassrooms ? _filteredClassrooms[index] : _classrooms[index];
-                  final financialData = _classroomFinancialData[classroom['id']] ?? {};
-                  final expectedRevenue = (financialData['expectedRevenue'] ?? 0.0).toDouble();
-                  final totalPaid = (financialData['totalPaid'] ?? 0.0).toDouble();
-                  final totalOwed = (financialData['totalOwed'] ?? 0.0).toDouble();
+                  final classroom = _isSearchingClassrooms
+                      ? _filteredClassrooms[index]
+                      : _classrooms[index];
+                  final financialData =
+                      _classroomFinancialData[classroom['id']] ?? {};
+                  final expectedRevenue =
+                  (financialData['expectedRevenue'] ?? 0.0)
+                      .toDouble();
+                  final totalPaid =
+                  (financialData['totalPaid'] ?? 0.0).toDouble();
+                  final collectionRate = expectedRevenue > 0
+                      ? (totalPaid / expectedRevenue) * 100
+                      : 0;
+
                   return _buildClassroomItem(
                     color: kOrange,
                     className: classroom['name'],
-                    students: '${classroom['studentCount'] ?? 0} students',
+                    students:
+                    '${classroom['studentCount'] ?? 0} students',
                     paid: _formatCurrencySimple(totalPaid),
-                    owed: _formatCurrencySimple(totalOwed),
-                    percent: '${financialData['collectionRate']?.toStringAsFixed(0) ?? 0}%',
-                    onTap: () => _showClassroomDetails(classroom),
+                    owed: '',
+                    percent:
+                    '${collectionRate.toStringAsFixed(0)}%',
+                    onTap: () =>
+                        _showClassroomDetails(classroom),
                   );
                 },
               ),
@@ -2628,9 +3023,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ── Students Screen ────────────────────────────────────────────────────────
+
   Widget _buildStudentsScreen() {
     if (_students.isEmpty) {
-      return _buildEmptyScreen('No students found', 'Students will appear here once added', Icons.school_rounded);
+      return _buildEmptyScreen('No students found',
+          'Students will appear here once added', Icons.school_rounded);
     }
 
     return Column(
@@ -2638,7 +3036,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _buildSearchBar(
           controller: _studentSearchController,
           onChanged: _filterStudents,
-          hint: 'Search by name, admission, class, guardian, or teacher...',
+          hint: 'Search by name, admission, class, or guardian...',
           isSearching: _isSearchingStudents,
           count: _filteredStudents.length,
           label: 'student',
@@ -2651,9 +3049,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
-              itemCount: _isSearchingStudents ? _filteredStudents.length : _students.length,
+              itemCount: _isSearchingStudents
+                  ? _filteredStudents.length
+                  : _students.length,
               itemBuilder: (context, index) {
-                final student = _isSearchingStudents ? _filteredStudents[index] : _students[index];
+                final student = _isSearchingStudents
+                    ? _filteredStudents[index]
+                    : _students[index];
                 return _buildStudentCard(student);
               },
             ),
@@ -2673,10 +3075,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -2684,18 +3085,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Container(
             width: _isMobile ? 45 : 50,
             height: _isMobile ? 45 : 50,
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradient,
-              shape: BoxShape.circle,
-            ),
+            decoration: const BoxDecoration(
+                gradient: AppColors.cardGradient, shape: BoxShape.circle),
             child: Center(
               child: Text(
-                student['name'].isNotEmpty ? student['name'][0].toUpperCase() : '?',
+                student['name'].isNotEmpty
+                    ? student['name'][0].toUpperCase()
+                    : '?',
                 style: TextStyle(
-                  fontSize: _isMobile ? 18 : 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+                    fontSize: _isMobile ? 18 : 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
               ),
             ),
           ),
@@ -2704,38 +3104,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  student['name'],
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: _isMobile ? 14 : 16,
-                    color: kNavy,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(student['name'],
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: _isMobile ? 14 : 16,
+                        color: kNavy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                Text(
-                  'Admission: ${student['admissionNo']}',
-                  style: TextStyle(
-                    fontSize: _isMobile ? 10 : 11,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
+                Text('Admission: ${student['admissionNo']}',
+                    style: TextStyle(
+                        fontSize: _isMobile ? 10 : 11,
+                        color: AppColors.textSecondary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.class_, size: _isMobile ? 12 : 14, color: kOrange),
+                    Icon(Icons.class_,
+                        size: _isMobile ? 12 : 14, color: kOrange),
                     const SizedBox(width: 4),
                     Expanded(
-                      child: Text(
-                        student['className'],
-                        style: TextStyle(
-                          fontSize: _isMobile ? 10 : 11,
-                          color: AppColors.textSecondary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: Text(student['className'],
+                          style: TextStyle(
+                              fontSize: _isMobile ? 10 : 11,
+                              color: AppColors.textSecondary),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1),
                     ),
                   ],
                 ),
@@ -2746,7 +3141,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _startConversationWithUser(
                   student['guardianId'],
                   'Guardian',
@@ -2756,7 +3152,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showStudentDetails(student),
               ),
             ],
@@ -2766,9 +3163,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ── Teachers Screen ────────────────────────────────────────────────────────
+
   Widget _buildTeachersScreen() {
     if (_teachers.isEmpty) {
-      return _buildEmptyScreen('No teachers found', 'Teachers will appear here once added', Icons.person_off);
+      return _buildEmptyScreen('No teachers found',
+          'Teachers will appear here once added', Icons.person_off);
     }
 
     return Column(
@@ -2789,9 +3189,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
-              itemCount: _isSearchingTeachers ? _filteredTeachers.length : _teachers.length,
+              itemCount: _isSearchingTeachers
+                  ? _filteredTeachers.length
+                  : _teachers.length,
               itemBuilder: (context, index) {
-                final teacher = _isSearchingTeachers ? _filteredTeachers[index] : _teachers[index];
+                final teacher = _isSearchingTeachers
+                    ? _filteredTeachers[index]
+                    : _teachers[index];
                 return _buildTeacherCard(teacher);
               },
             ),
@@ -2811,10 +3215,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -2823,48 +3226,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
             width: 50,
             height: 50,
             decoration: BoxDecoration(
-              gradient: AppColors.cardGradient,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.person, size: 28, color: Colors.white),
+                gradient: AppColors.cardGradient,
+                borderRadius: BorderRadius.circular(12)),
+            child:
+            const Icon(Icons.person, size: 28, color: Colors.white),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  teacher['name'],
-                  style: TextStyle(
-                    fontSize: _isMobile ? 15 : 16,
-                    fontWeight: FontWeight.bold,
-                    color: kNavy,
-                  ),
-                ),
+                Text(teacher['name'],
+                    style: TextStyle(
+                        fontSize: _isMobile ? 15 : 16,
+                        fontWeight: FontWeight.bold,
+                        color: kNavy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 4),
-                Text(
-                  teacher['email'],
-                  style: TextStyle(
-                    fontSize: _isMobile ? 11 : 12,
-                    color: AppColors.textSecondary,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(teacher['email'],
+                    style: TextStyle(
+                        fontSize: _isMobile ? 11 : 12,
+                        color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Icon(Icons.class_, size: _isMobile ? 14 : 16, color: kOrange),
+                    Icon(Icons.class_,
+                        size: _isMobile ? 14 : 16, color: kOrange),
                     const SizedBox(width: 4),
                     Expanded(
-                      child: Text(
-                        teacher['className'],
-                        style: TextStyle(
-                          fontSize: _isMobile ? 12 : 13,
-                          fontWeight: FontWeight.w500,
-                          color: kNavy,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: Text(teacher['className'],
+                          style: TextStyle(
+                              fontSize: _isMobile ? 12 : 13,
+                              fontWeight: FontWeight.w500,
+                              color: kNavy),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1),
                     ),
                   ],
                 ),
@@ -2875,11 +3274,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showTeacherDetails(teacher),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showTeacherDetails(teacher),
               ),
             ],
@@ -2889,9 +3290,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ── Guardians Screen ───────────────────────────────────────────────────────
+
   Widget _buildGuardiansScreen() {
     if (_guardians.isEmpty) {
-      return _buildEmptyScreen('No guardians found', 'Guardians will appear here once added', Icons.family_restroom);
+      return _buildEmptyScreen('No guardians found',
+          'Guardians will appear here once added', Icons.family_restroom);
     }
 
     return Column(
@@ -2912,9 +3316,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ? _buildEmptySearchResults()
                 : ListView.builder(
               padding: EdgeInsets.all(_isMobile ? 12 : 16),
-              itemCount: _isSearchingGuardians ? _filteredGuardians.length : _guardians.length,
+              itemCount: _isSearchingGuardians
+                  ? _filteredGuardians.length
+                  : _guardians.length,
               itemBuilder: (context, index) {
-                final guardian = _isSearchingGuardians ? _filteredGuardians[index] : _guardians[index];
+                final guardian = _isSearchingGuardians
+                    ? _filteredGuardians[index]
+                    : _guardians[index];
                 return _buildGuardianCard(guardian);
               },
             ),
@@ -2936,10 +3344,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -2948,39 +3355,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
             width: 50,
             height: 50,
             decoration: BoxDecoration(
-              gradient: AppColors.cardGradient,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.person, size: 28, color: Colors.white),
+                gradient: AppColors.cardGradient,
+                borderRadius: BorderRadius.circular(12)),
+            child:
+            const Icon(Icons.person, size: 28, color: Colors.white),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(guardian['name'],
+                    style: TextStyle(
+                        fontSize: _isMobile ? 15 : 16,
+                        fontWeight: FontWeight.bold,
+                        color: kNavy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                Text(guardian['email'],
+                    style: TextStyle(
+                        fontSize: _isMobile ? 11 : 12,
+                        color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
                 Text(
-                  guardian['name'],
-                  style: TextStyle(
-                    fontSize: _isMobile ? 15 : 16,
-                    fontWeight: FontWeight.bold,
-                    color: kNavy,
-                  ),
-                ),
-                Text(
-                  guardian['email'],
-                  style: TextStyle(
-                    fontSize: _isMobile ? 11 : 12,
-                    color: AppColors.textSecondary,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  '${guardianStudents.length} Child${guardianStudents.length != 1 ? 'ren' : ''}',
-                  style: TextStyle(
-                    fontSize: _isMobile ? 11 : 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
+                    '${guardianStudents.length} Child${guardianStudents.length != 1 ? 'ren' : ''}',
+                    style: TextStyle(
+                        fontSize: _isMobile ? 11 : 12,
+                        color: AppColors.textSecondary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -2988,11 +3392,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.message, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.message,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showGuardianDetails(guardian),
               ),
               IconButton(
-                icon: Icon(Icons.visibility, color: kOrange, size: _isMobile ? 20 : 22),
+                icon: Icon(Icons.visibility,
+                    color: kOrange, size: _isMobile ? 20 : 22),
                 onPressed: () => _showGuardianDetails(guardian),
               ),
             ],
@@ -3006,41 +3412,371 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return const MessagesScreen();
   }
 
-  Widget _buildSettingsScreen() {
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(_isMobile ? 12 : 16),
+  // ==================== TEACHER ATTENDANCE SCREEN ====================
+
+  Widget _buildTeacherAttendanceScreen() {
+    final recordsForDisplay = _teacherAttendance.isNotEmpty
+        ? _teacherAttendance
+        : _teachers
+        .map((t) => {
+      'teacherId': t['id'],
+      'teacherName': t['name'],
+      'teacherEmail': t['email'],
+      'clockInTime': null,
+      'clockOutTime': null,
+      'status': 'absent',
+    })
+        .toList();
+
+    final query =
+    _teacherAttendanceSearchController.text.trim().toLowerCase();
+    final filtered = recordsForDisplay.where((r) {
+      final name = (r['teacherName'] ??
+          '${r['firstname'] ?? ''} ${r['lastname'] ?? ''}')
+          .toString()
+          .toLowerCase();
+      if (query.isNotEmpty && !name.contains(query)) return false;
+      if (_teacherAttendanceFilter == 'present') return _isPresentRecord(r);
+      if (_teacherAttendanceFilter == 'absent') return !_isPresentRecord(r);
+      return true;
+    }).toList();
+
+    final present = _teacherAttendanceSummary['present'] ?? 0;
+    final total = _teacherAttendanceSummary['total'] ?? 0;
+    final absent = _teacherAttendanceSummary['absent'] ?? 0;
+
+    return Column(
+      children: [
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildAttendanceSummaryTile(
+                        label: 'Total',
+                        value: '$total',
+                        color: kNavy,
+                        icon: Icons.people_alt_outlined),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildAttendanceSummaryTile(
+                        label: 'Present',
+                        value: '$present',
+                        color: kGreen,
+                        icon: Icons.check_circle_outline),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildAttendanceSummaryTile(
+                        label: 'Absent',
+                        value: '$absent',
+                        color: kRed,
+                        icon: Icons.cancel_outlined),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _teacherAttendanceSearchController,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Search teacher...',
+                  hintStyle: const TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary),
+                  prefixIcon: const Icon(Icons.search, color: kOrange),
+                  suffixIcon:
+                  _teacherAttendanceSearchController.text.isNotEmpty
+                      ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _teacherAttendanceSearchController.clear();
+                        setState(() {});
+                      })
+                      : null,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                    BorderSide(color: kOrange.withOpacity(0.3)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                    BorderSide(color: kOrange.withOpacity(0.2)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                    const BorderSide(color: kOrange, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: kLightOrange,
+                  contentPadding: const EdgeInsets.symmetric(
+                      vertical: 10, horizontal: 16),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildAttendanceFilterChip('All', 'all'),
+                    const SizedBox(width: 8),
+                    _buildAttendanceFilterChip('Present', 'present'),
+                    const SizedBox(width: 8),
+                    _buildAttendanceFilterChip('Absent', 'absent'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _fetchTeacherAttendance,
+            color: kOrange,
+            child: _isLoadingTeacherAttendance
+                ? const Center(
+                child: CircularProgressIndicator(color: kOrange))
+                : _teacherAttendanceError != null
+                ? _buildTeacherAttendanceError()
+                : filtered.isEmpty
+                ? _buildTeacherAttendanceEmpty()
+                : ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: filtered.length,
+              itemBuilder: (context, index) =>
+                  _buildTeacherAttendanceCard(filtered[index]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAttendanceSummaryTile({
+    required String label,
+    required String value,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Settings',
-            style: TextStyle(
-              fontSize: _isMobile ? 22 : 26,
-              fontWeight: FontWeight.bold,
-              color: kNavy,
-            ),
+          Icon(icon, color: color, size: 18),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: color),
+                maxLines: 1),
           ),
-          const SizedBox(height: 16),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+          Text(label,
+              style: const TextStyle(fontSize: 11, color: kTextGrey),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceFilterChip(String label, String value) {
+    final selected = _teacherAttendanceFilter == value;
+    return ChoiceChip(
+      label: Text(label,
+          style: TextStyle(
+              fontSize: 12,
+              color: selected ? Colors.white : kNavy,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500)),
+      selected: selected,
+      selectedColor: kOrange,
+      backgroundColor: Colors.white,
+      onSelected: (_) => setState(() => _teacherAttendanceFilter = value),
+      showCheckmark: false,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: selected ? kOrange : kBorder),
+      ),
+    );
+  }
+
+  Widget _buildTeacherAttendanceCard(Map<String, dynamic> r) {
+    final name = r['teacherName'] ??
+        '${r['firstname'] ?? ''} ${r['lastname'] ?? ''}'.trim();
+    final email = r['teacherEmail'] ?? r['email'] ?? '';
+    final clockIn = _formatTimeOfDay(r['clockInTime']);
+    final clockOut = _formatTimeOfDay(r['clockOutTime']);
+    final present = _isPresentRecord(r);
+    final late = _isLateRecord(r);
+    final statusColor = !present ? kRed : (late ? kOrange : kGreen);
+    final statusLabel = !present
+        ? 'Absent'
+        : (late ? 'Late' : (clockOut != '—' ? 'Out' : 'In'));
+    final statusIcon = !present
+        ? Icons.cancel
+        : (late
+        ? Icons.schedule
+        : (clockOut != '—' ? Icons.logout : Icons.login));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: statusColor.withOpacity(0.25), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.12),
+                    shape: BoxShape.circle),
+                child: Center(
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor),
+                  ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: kNavy),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    if (email.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(email,
+                            style: const TextStyle(
+                                fontSize: 11, color: kTextGrey),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: statusColor.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 12, color: statusColor),
+                    const SizedBox(width: 4),
+                    Text(statusLabel,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: statusColor,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: kBorder),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildClockTile(
+                    label: 'Clock In',
+                    time: clockIn,
+                    color: kGreen,
+                    icon: Icons.login_rounded),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildClockTile(
+                    label: 'Clock Out',
+                    time: clockOut,
+                    color: kOrange,
+                    icon: Icons.logout_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClockTile({
+    required String label,
+    required String time,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSettingsTile(Icons.person, 'Profile', 'View and edit your profile'),
-                _buildSettingsTile(Icons.school, 'School Settings', 'Manage school information'),
-                _buildSettingsTile(Icons.attach_money, 'Fee Structure', 'Set fees for each class'),
-                _buildSettingsTile(Icons.calendar_today, 'Terms & Sessions', 'Manage academic terms'),
-                _buildSettingsTile(Icons.logout, 'Logout', 'Sign out of your account', isDestructive: true, onTap: _showLogoutDialog),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 10, color: kTextGrey),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(time,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: color),
+                      maxLines: 1),
+                ),
               ],
             ),
           ),
@@ -3049,27 +3785,404 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildSettingsTile(IconData icon, String title, String subtitle, {bool isDestructive = false, VoidCallback? onTap}) {
+  Widget _buildTeacherAttendanceError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 56, color: kRed),
+            const SizedBox(height: 12),
+            const Text('Could not load teacher attendance',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: kNavy)),
+            const SizedBox(height: 6),
+            Text(_teacherAttendanceError ?? '',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: kTextGrey)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _fetchTeacherAttendance,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: kOrange, foregroundColor: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTeacherAttendanceEmpty() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.fact_check_outlined, size: 56, color: kBorder),
+            SizedBox(height: 12),
+            Text('No teachers found',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: kNavy)),
+            SizedBox(height: 6),
+            Text('Add teachers to your school to track attendance.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: kTextGrey)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== SETTINGS SCREEN ====================
+
+  Widget _buildSettingsScreen() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(_isMobile ? 12 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Settings',
+              style: TextStyle(
+                  fontSize: _isMobile ? 22 : 26,
+                  fontWeight: FontWeight.bold,
+                  color: kNavy)),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kOrange.withOpacity(0.3), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Column(
+              children: [
+                _buildSettingsTile(
+                  Icons.person,
+                  'Profile',
+                  'View your profile information',
+                  onTap: _showProfileSheet,
+                ),
+                _buildSettingsTile(
+                  Icons.school,
+                  'School Settings',
+                  'View school information',
+                  onTap: _showSchoolInfoSheet,
+                ),
+                _buildSettingsTile(
+                  Icons.attach_money,
+                  'Fee Structure',
+                  'Fees across all classrooms',
+                  onTap: _showFeeStructureSheet,
+                ),
+                _buildSettingsTile(
+                  Icons.calendar_today,
+                  'Terms & Sessions',
+                  'Current academic period',
+                  onTap: _showTermsAndSessionsSheet,
+                ),
+                _buildSettingsTile(
+                  Icons.logout,
+                  'Logout',
+                  'Sign out of your account',
+                  isDestructive: true,
+                  onTap: _showLogoutDialog,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsTile(
+      IconData icon,
+      String title,
+      String subtitle, {
+        bool isDestructive = false,
+        required VoidCallback onTap,
+      }) {
     return Column(
       children: [
         ListTile(
           leading: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: (isDestructive ? AppColors.error : kOrange).withOpacity(0.1),
+              color: (isDestructive ? AppColors.error : kOrange)
+                  .withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: (isDestructive ? AppColors.error : kOrange).withOpacity(0.2),
+                color: (isDestructive ? AppColors.error : kOrange)
+                    .withOpacity(0.2),
               ),
             ),
-            child: Icon(icon, color: isDestructive ? AppColors.error : kOrange, size: 20),
+            child: Icon(icon,
+                color: isDestructive ? AppColors.error : kOrange, size: 20),
           ),
-          title: Text(title, style: TextStyle(color: isDestructive ? AppColors.error : kNavy)),
+          title: Text(title,
+              style:
+              TextStyle(color: isDestructive ? AppColors.error : kNavy)),
           subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-          onTap: onTap ?? _showComingSoon,
+          onTap: onTap,
         ),
         const Divider(height: 1),
+      ],
+    );
+  }
+
+  // ==================== SETTINGS SHEETS ====================
+
+  void _showProfileSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSheetHeader('My Profile'),
+            const SizedBox(height: 16),
+            _buildInfoCard([
+              _buildInfoRow('Name', _currentUser.name),
+              _buildInfoRow('Email', _currentUser.email),
+              _buildInfoRow('Phone', _currentUser.phone ?? 'N/A'),
+              _buildInfoRow('Role', 'School Administrator'),
+              _buildInfoRow('School',
+                  _currentUser.schoolName.isNotEmpty
+                      ? _currentUser.schoolName
+                      : 'N/A'),
+            ]),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: kOrange,
+                    foregroundColor: Colors.white),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSchoolInfoSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSheetHeader('School Information'),
+            const SizedBox(height: 16),
+            _buildInfoCard([
+              _buildInfoRow('School Name',
+                  _currentUser.schoolName.isNotEmpty
+                      ? _currentUser.schoolName
+                      : 'N/A'),
+              _buildInfoRow('School ID', _currentUser.schoolId),
+              _buildInfoRow('Session', _currentUser.sessionId ?? 'N/A'),
+              _buildInfoRow('Term', _currentUser.term ?? 'N/A'),
+              _buildInfoRow('Total Students', '${_students.length}'),
+              _buildInfoRow('Total Teachers', '${_teachers.length}'),
+              _buildInfoRow('Total Classrooms', '${_classrooms.length}'),
+              _buildInfoRow('Total Guardians', '$_guardianCount'),
+            ]),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: kOrange,
+                    foregroundColor: Colors.white),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFeeStructureSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSheetHeader('Fee Structure'),
+              const SizedBox(height: 4),
+              const Text('Fees for each classroom this term',
+                  style: TextStyle(fontSize: 12, color: kTextGrey)),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _classrooms.isEmpty
+                    ? const Center(
+                    child: Text('No classrooms set up yet'))
+                    : ListView.separated(
+                  controller: scrollController,
+                  itemCount: _classrooms.length,
+                  separatorBuilder: (_, __) =>
+                  const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final classroom = _classrooms[index];
+                    final fee =
+                    (classroom['feeAmount'] ?? 0.0).toDouble();
+                    final students = classroom['studentCount'] ?? 0;
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: kLightOrange,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: kOrange.withOpacity(0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: const BoxDecoration(
+                                color: kOrange,
+                                shape: BoxShape.circle),
+                            child: const Icon(Icons.school,
+                                color: Colors.white, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                    classroom['name'] ?? 'Unknown',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: kNavy),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                    '$students student${students != 1 ? 's' : ''}',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: kTextGrey)),
+                              ],
+                            ),
+                          ),
+                          Text(_formatCurrencySimple(fee),
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: kOrange)),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showTermsAndSessionsSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSheetHeader('Terms & Sessions'),
+            const SizedBox(height: 16),
+            _buildInfoCard([
+              _buildInfoRow('Current Session',
+                  _currentUser.sessionId ?? 'N/A'),
+              _buildInfoRow('Current Term', _currentUser.term ?? 'N/A'),
+              _buildInfoRow('Session Key',
+                  _currentUser.sessionKey ?? _currentUser.sessionId ?? 'N/A'),
+              _buildInfoRow('Term ID', _currentUser.termId ?? 'N/A'),
+            ]),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: kOrange,
+                    foregroundColor: Colors.white),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSheetHeader(String title) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Text(title,
+              style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: kNavy),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ),
+        IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close),
+        ),
       ],
     );
   }
@@ -3095,8 +4208,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: onChanged,
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(fontSize: _isMobile ? 13 : 14, color: AppColors.textSecondary),
-              prefixIcon: Icon(Icons.search, color: kOrange, size: _isMobile ? 20 : 22),
+              hintStyle: TextStyle(
+                  fontSize: _isMobile ? 13 : 14,
+                  color: AppColors.textSecondary),
+              prefixIcon: Icon(Icons.search,
+                  color: kOrange, size: _isMobile ? 20 : 22),
               suffixIcon: controller.text.isNotEmpty
                   ? IconButton(
                 icon: Icon(Icons.clear, size: _isMobile ? 18 : 20),
@@ -3121,25 +4237,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
               filled: true,
               fillColor: kLightOrange,
               contentPadding: EdgeInsets.symmetric(
-                vertical: _isMobile ? 10 : 12,
-                horizontal: 16,
-              ),
+                  vertical: _isMobile ? 10 : 12, horizontal: 16),
             ),
           ),
         ),
         if (isSearching)
           Container(
             width: double.infinity,
-            padding: EdgeInsets.symmetric(horizontal: _isMobile ? 12 : 16, vertical: 8),
+            padding: EdgeInsets.symmetric(
+                horizontal: _isMobile ? 12 : 16, vertical: 8),
             color: kOrange.withOpacity(0.05),
-            child: Text(
-              'Found $count $label${count != 1 ? 's' : ''}',
-              style: TextStyle(
-                fontSize: _isMobile ? 12 : 13,
-                color: kOrange,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            child: Text('Found $count $label${count != 1 ? 's' : ''}',
+                style: TextStyle(
+                    fontSize: _isMobile ? 12 : 13,
+                    color: kOrange,
+                    fontWeight: FontWeight.w500)),
           ),
       ],
     );
@@ -3160,23 +4272,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Icon(icon, size: 64, color: kOrange.withOpacity(0.3)),
           ),
           const SizedBox(height: 16),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: _isMobile ? 16 : 20,
-              fontWeight: FontWeight.bold,
-              color: kNavy,
-            ),
-          ),
+          Text(title,
+              style: TextStyle(
+                  fontSize: _isMobile ? 16 : 20,
+                  fontWeight: FontWeight.bold,
+                  color: kNavy)),
           const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: _isMobile ? 12 : 13,
-              color: AppColors.textSecondary,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          Text(subtitle,
+              style: TextStyle(
+                  fontSize: _isMobile ? 12 : 13,
+                  color: AppColors.textSecondary),
+              textAlign: TextAlign.center),
         ],
       ),
     );
@@ -3187,23 +4293,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off, size: 48, color: kOrange.withOpacity(0.3)),
+          Icon(Icons.search_off,
+              size: 48, color: kOrange.withOpacity(0.3)),
           const SizedBox(height: 12),
-          Text(
-            'No results found',
-            style: TextStyle(
-              fontSize: _isMobile ? 14 : 16,
-              color: AppColors.textSecondary,
-            ),
-          ),
+          Text('No results found',
+              style: TextStyle(
+                  fontSize: _isMobile ? 14 : 16,
+                  color: AppColors.textSecondary)),
         ],
       ),
-    );
-  }
-
-  void _showComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Feature coming soon!'), backgroundColor: AppColors.info),
     );
   }
 
@@ -3215,11 +4313,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(color: kOrange.withOpacity(0.3)),
         ),
-        title: Row(
+        title: const Row(
           children: [
             Icon(Icons.logout, color: AppColors.error),
-            const SizedBox(width: 8),
-            const Text('Logout', style: TextStyle(color: AppColors.error)),
+            SizedBox(width: 8),
+            Text('Logout', style: TextStyle(color: AppColors.error)),
           ],
         ),
         content: const Text('Are you sure you want to logout?'),
@@ -3230,18 +4328,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final authProvider =
+              Provider.of<AuthProvider>(context, listen: false);
               await authProvider.logout();
               if (mounted) {
                 Navigator.pushReplacement(
                   context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  MaterialPageRoute(
+                      builder: (context) => const LoginScreen()),
                 );
               }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.error,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             child: const Text('Logout'),
           ),
@@ -3257,11 +4358,9 @@ class _NavItem {
   final IconData icon;
   final String label;
   final int index;
-  final bool? isMessages;
   const _NavItem({
     required this.icon,
     required this.label,
     required this.index,
-    this.isMessages,
   });
 }

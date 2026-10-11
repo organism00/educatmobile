@@ -1,8 +1,18 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// ✅ Correct Kotlin DSL syntax for loading keystore properties
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -29,10 +39,23 @@ android {
         multiDexEnabled = true
     }
 
+    // ✅ Add signing configs
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+        }
+    }
+
     buildTypes {
-        release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+        getByName("release") {
+            // ✅ Attach the signing config to release build
+            signingConfig = signingConfigs.getByName("release")
+
+            isMinifyEnabled = false
+            isShrinkResources = false
 
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -40,7 +63,6 @@ android {
             )
         }
     }
-    // No signingConfigs needed for debug builds!
 }
 
 flutter {
@@ -52,4 +74,3 @@ dependencies {
     implementation("androidx.multidex:multidex:2.0.1")
     implementation("androidx.biometric:biometric:1.1.0")
 }
-

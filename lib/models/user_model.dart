@@ -7,7 +7,8 @@ class UserModel {
   final String role;
   final String schoolName;
   final String schoolReg;
-  final String schoolId;
+  final String schoolId;              // ← internal SCRM school UUID
+  final String edubanclSchoolId;      // ← 🆕 Edubanc's school UUID
   final String sessionId;
   final String sessionKey;
   final String term;
@@ -33,6 +34,7 @@ class UserModel {
     required this.schoolName,
     required this.schoolReg,
     required this.schoolId,
+    this.edubanclSchoolId = '',      // 🆕 default empty for backwards compatibility
     required this.sessionId,
     required this.sessionKey,
     required this.term,
@@ -63,6 +65,12 @@ class UserModel {
       schoolName: payload['schoolName'] ?? '',
       schoolReg: payload['schoolReg'] ?? '',
       schoolId: payload['schoolId'] ?? '',
+      // 🆕 Try multiple possible field names from the JWT
+      edubanclSchoolId: payload['edubanclSchoolId'] ??
+          payload['edubancSchoolId'] ??
+          payload['edubanc_id'] ??
+          payload['edubanclSchoolId'] ??
+          '',
       sessionId: payload['sessionId'] ?? '',
       sessionKey: payload['sessionKey'] ?? '',
       term: payload['term'] ?? '',
@@ -85,6 +93,7 @@ class UserModel {
       schoolName: jwtUser.schoolName,
       schoolReg: jwtUser.schoolReg,
       schoolId: jwtUser.schoolId,
+      edubanclSchoolId: jwtUser.edubanclSchoolId,  // 🆕 preserve from JWT
       sessionId: jwtUser.sessionId,
       sessionKey: jwtUser.sessionKey,
       term: jwtUser.term,
@@ -112,6 +121,7 @@ class UserModel {
       schoolName: jwtUser.schoolName,
       schoolReg: jwtUser.schoolReg,
       schoolId: jwtUser.schoolId,
+      edubanclSchoolId: jwtUser.edubanclSchoolId,
       sessionId: jwtUser.sessionId,
       sessionKey: jwtUser.sessionKey,
       term: jwtUser.term,
@@ -141,6 +151,7 @@ class UserModel {
       schoolName: jwtUser.schoolName,
       schoolReg: jwtUser.schoolReg,
       schoolId: jwtUser.schoolId,
+      edubanclSchoolId: jwtUser.edubanclSchoolId,
       sessionId: jwtUser.sessionId,
       sessionKey: jwtUser.sessionKey,
       term: jwtUser.term,
@@ -165,6 +176,11 @@ class UserModel {
       schoolName: json['schoolName'] ?? '',
       schoolReg: json['schoolReg'] ?? '',
       schoolId: json['schoolId'] ?? '',
+      // 🆕 Look for edubanc1SchoolId in JSON (with fallbacks for possible API naming)
+      edubanclSchoolId: json['edubanclSchoolId'] ??
+          json['edubancSchoolId'] ??
+          json['edubanc_id'] ??
+          '',
       sessionId: json['sessionId'] ?? '',
       sessionKey: json['sessionKey'] ?? '',
       term: json['term'] ?? '',
@@ -192,6 +208,7 @@ class UserModel {
       'schoolName': schoolName,
       'schoolReg': schoolReg,
       'schoolId': schoolId,
+      'edubanclSchoolId': edubanclSchoolId,   // 🆕
       'sessionId': sessionId,
       'sessionKey': sessionKey,
       'term': term,
@@ -218,6 +235,7 @@ class UserModel {
     String? schoolName,
     String? schoolReg,
     String? schoolId,
+    String? edubanclSchoolId,           // 🆕
     String? sessionId,
     String? sessionKey,
     String? term,
@@ -241,6 +259,7 @@ class UserModel {
       schoolName: schoolName ?? this.schoolName,
       schoolReg: schoolReg ?? this.schoolReg,
       schoolId: schoolId ?? this.schoolId,
+      edubanclSchoolId: edubanclSchoolId ?? this.edubanclSchoolId,   // 🆕
       sessionId: sessionId ?? this.sessionId,
       sessionKey: sessionKey ?? this.sessionKey,
       term: term ?? this.term,
@@ -259,7 +278,7 @@ class UserModel {
     );
   }
 
-  // Helper getters
+  // Helper getters (unchanged)
   bool get isAdmin => role == 'SchoolAdmin' || role == 'Admin' || role == 'SuperAdmin';
   bool get isTeacher => role == 'Teacher';
   bool get isGuardian => role == 'Guardian';
@@ -288,32 +307,35 @@ class UserModel {
     return name.isNotEmpty ? name : email.split('@').first;
   }
 
-  // Update token method
   UserModel updateToken(String newToken) {
     return copyWith(token: newToken);
   }
 
-  // Update device ID
   UserModel updateDeviceId(String deviceId) {
     return copyWith(deviceId: deviceId);
   }
 
-  // Update FCM token
   UserModel updateFcmToken(String fcmToken) {
     return copyWith(fcmToken: fcmToken);
   }
 
-  // Check if user has specific permission
+  // 🆕 Helper: check whether Edubanc school ID is set
+  bool get hasEdubancSchoolId =>
+      edubanclSchoolId.isNotEmpty &&
+          edubanclSchoolId != '00000000-0000-0000-0000-000000000000';
+
+  // 🆕 Helper: check whether internal school ID is set
+  bool get hasInternalSchoolId =>
+      schoolId.isNotEmpty &&
+          schoolId != '00000000-0000-0000-0000-000000000000';
+
   bool hasPermission(String permission) {
-    // Implement permission checking based on your system
-    // This is a simplified example
     if (isSuperAdmin) return true;
     if (isAdmin) return true;
     if (isTeacher && permission.startsWith('teacher_')) return true;
     return false;
   }
 
-  // Get user role display name
   String get roleDisplayName {
     switch (role) {
       case 'SuperAdmin':
@@ -333,6 +355,8 @@ class UserModel {
 
   @override
   String toString() {
-    return 'UserModel(id: $id, name: $name, email: $email, role: $role, school: $schoolName)';
+    return 'UserModel(id: $id, name: $name, email: $email, role: $role, '
+        'schoolId: $schoolId, edubanclSchoolId: $edubanclSchoolId, '
+        'school: $schoolName)';
   }
 }

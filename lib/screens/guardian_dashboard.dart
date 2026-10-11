@@ -9,7 +9,6 @@ import '../models/loan_application.dart';
 import '../services/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/discount_provider.dart';
-import '../services/fee_provider.dart';
 import '../services/loan_provider.dart';
 import '../utils/app_colors.dart';
 import '../screens/conversation_screen.dart';
@@ -19,6 +18,7 @@ import '../screens/fee_payment_screen.dart';
 import '../screens/loan_request_screen.dart';
 import '../screens/assessment_status_screen.dart';
 import '../screens/loan_application_screen.dart';
+import '../screens/payment_history_screen.dart';
 import 'login_screen.dart';
 
 class GuardianDashboard extends StatefulWidget {
@@ -28,7 +28,8 @@ class GuardianDashboard extends StatefulWidget {
   State<GuardianDashboard> createState() => _GuardianDashboardState();
 }
 
-class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKeepAliveClientMixin {
+class _GuardianDashboardState extends State<GuardianDashboard>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -37,21 +38,22 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
   late ApiService _apiService;
   late LoanProvider _loanProvider;
 
-  // Data states
+  // Data
   List<Map<String, dynamic>> _pupils = [];
   List<Map<String, dynamic>> _filteredPupils = [];
   double _walletBalance = 0.00;
+  double _totalOutstandingDue = 0.00;
   bool _isLoading = true;
   bool _isRefreshing = false;
   String? _errorMessage;
 
-  // Account details
+  // Account
   String _accountNumber = '';
   String _accountName = '';
   String _bankName = '';
   double _ledgerBalance = 0.00;
 
-  // Loan data
+  // Loans
   double _loanBalance = 0.00;
   int _activeLoans = 0;
   bool _isLoadingLoan = false;
@@ -60,36 +62,30 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
   int _currentCarouselIndex = 0;
   final PageController _pageController = PageController();
 
-  // News data
+  // News
   List<Map<String, dynamic>> _news = [];
   bool _isLoadingNews = false;
 
-  // HMO data
+  // HMO
   List<Map<String, dynamic>> _hospitalRecords = [];
   bool _isLoadingHMO = false;
   int _selectedPupilForHMO = 0;
 
-  // Results data
+  // Results
   bool _isLoadingResult = false;
 
-  // Assignments data
+  // Assignments
   List<Map<String, dynamic>> _assignments = [];
   bool _isLoadingAssignments = false;
 
-  // Messages - Unread count
+  // Messages
   int _unreadMessageCount = 0;
-
-  // Other fees data
-  List<Map<String, dynamic>> _otherFees = [];
-  double _totalOtherFees = 0.0;
-  bool _isLoadingOtherFees = false;
-  String? _otherFeesErrorMessage;
 
   // Search
   final TextEditingController _searchController = TextEditingController();
   bool _isSearchingPupils = false;
 
-  // Cached responsive values
+  // Responsive
   late ResponsiveInfo _resp;
   bool _isInitialized = false;
 
@@ -126,37 +122,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     _currentUser = authProvider.currentUser!;
   }
 
-  Future<void> _fetchUnreadMessages() async {
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-    if (token == null) return;
-
-    final result = await _apiService.getInboxMessages(
-      token: token,
-      userId: _currentUser.id,
-      userRole: 'Guardian',
-    );
-
-    if (result['success'] && mounted) {
-      final messages = result['data'] as List? ?? [];
-      final unreadCount = messages.where((m) => m['isRead'] == false).length;
-      if (mounted) {
-        setState(() {
-          _unreadMessageCount = unreadCount;
-        });
-      }
-    }
-  }
-
-  String _getCurrentSessionId() {
-    String sessionId = _currentUser.sessionId ?? '';
-    if (sessionId.isEmpty) {
-      final now = DateTime.now();
-      final year = now.year;
-      final nextYear = year + 1;
-      sessionId = '$year/$nextYear';
-    }
-    return sessionId;
-  }
+  // ==================== DATA FETCH ====================
 
   Future<void> _fetchDashboardData() async {
     setState(() {
@@ -177,108 +143,135 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     }
 
     try {
-      final studentsResult = await _apiService.getGuardianStudents(
-        token: token,
-        guardianId: _currentUser.id,
-      ).timeout(const Duration(seconds: 30));
+      // 1. Fetch students
+      final studentsResult = await _apiService
+          .getGuardianStudents(token: token, guardianId: _currentUser.id)
+          .timeout(const Duration(seconds: 30));
 
-      if (studentsResult['success'] && mounted) {
-        final studentsData = studentsResult['data'] as List? ?? [];
-        final List<Map<String, dynamic>> mappedPupils = [];
-        final String sessionId = _getCurrentSessionId();
-
-        for (var student in studentsData) {
-          final teacher = student['teacher'];
-          final classroom = student['classroom'];
-          final studentId = student['studentId'] ?? '';
-          final classroomId = student['classroomId'] ?? '';
-
-          double feeAmount = 0.0;
-
-          if (student['fee'] != null) {
-            feeAmount = (student['fee'] as num?)?.toDouble() ?? 0.0;
-          } else if (classroom != null) {
-            feeAmount = (classroom['fee'] as num?)?.toDouble() ??
-                (classroom['amount'] as num?)?.toDouble() ??
-                (classroom['feeAmount'] as num?)?.toDouble() ??
-                (classroom['schoolFee'] as num?)?.toDouble() ??
-                0.0;
-          }
-
-          if (feeAmount == 0.0 && classroomId.isNotEmpty && token != null && sessionId.isNotEmpty) {
-            try {
-              final feeResult = await _apiService.getClassFeeForTerm(
-                token: token,
-                classId: classroomId,
-                sessionId: sessionId,
-              );
-              if (feeResult['success'] && feeResult['fee'] > 0) {
-                feeAmount = feeResult['fee'];
-              }
-            } catch (e) {
-              // Silent fail
-            }
-          }
-
-          if (feeAmount == 0.0 && studentId.isNotEmpty && token != null && sessionId.isNotEmpty) {
-            try {
-              final feeResult = await _apiService.getStudentFee(
-                token: token,
-                studentId: studentId,
-                sessionId: sessionId,
-              );
-              if (feeResult['success'] && feeResult['fee'] > 0) {
-                feeAmount = feeResult['fee'];
-              }
-            } catch (e) {
-              // Silent fail
-            }
-          }
-
-          mappedPupils.add({
-            'id': studentId,
-            'name': '${student['firstname'] ?? ''} ${student['lastname'] ?? ''}'.trim(),
-            'class': classroom?['name'] ?? student['classroomId'] ?? 'N/A',
-            'classroomId': classroomId,
-            'classroomName': classroom?['name'] ?? 'N/A',
-            'teacherId': teacher?['teacherId'] ?? '',
-            'teacherName': teacher != null
-                ? '${teacher['firstname'] ?? ''} ${teacher['lastname'] ?? ''}'.trim()
-                : 'Not Assigned',
-            'teacherEmail': teacher?['email'] ?? 'Not available',
-            'teacherPhone': teacher?['phone'] ?? 'Not available',
-            'feeStatus': 'Pending',
-            'feeAmount': feeAmount,
-            'averageScore': 0,
-            'attendance': 0,
-            'admissionNo': student['studentNo'] ?? '',
-          });
-        }
-
+      if (studentsResult['success'] != true) {
         if (mounted) {
           setState(() {
-            _pupils = mappedPupils;
-            _filteredPupils = List.from(mappedPupils);
-          });
-        }
-
-        await _fetchWalletAndAccount(token);
-        await _fetchLoanData(token);
-        await _fetchAssignments(token);
-        await _fetchLoanApplications(token);
-        _fetchDiscountsForAllPupils(token);
-
-        if (mounted) {
-          setState(() {
+            _errorMessage =
+                studentsResult['message'] ?? 'Failed to load students data';
             _isLoading = false;
           });
         }
-      } else if (mounted) {
-        setState(() {
-          _errorMessage = studentsResult['message'] ?? 'Failed to load students data';
-          _isLoading = false;
+        return;
+      }
+
+      final studentsData = studentsResult['data'] as List? ?? [];
+
+      // 2. Fetch all pending fees in one call
+      Map<String, Map<String, dynamic>> pendingByStudent = {};
+      double grandTotalDue = 0.0;
+
+      try {
+        final pendingResult = await _apiService.getGuardianPendingPayments(
+          token: token,
+          guardianId: _currentUser.id,
+        );
+
+        if (pendingResult['success'] == true) {
+          final List<dynamic> studentsPending =
+              (pendingResult['students'] as List?) ?? [];
+          grandTotalDue =
+              (pendingResult['grandTotalDue'] as num?)?.toDouble() ?? 0.0;
+
+          for (var s in studentsPending) {
+            if (s is Map<String, dynamic>) {
+              final sid = s['studentId']?.toString() ?? '';
+              if (sid.isNotEmpty) pendingByStudent[sid] = s;
+            }
+          }
+        }
+      } catch (e) {
+        print('⚠️ Failed to fetch pending fees: $e');
+      }
+
+      // 3. Map pupils with fee data
+      final List<Map<String, dynamic>> mappedPupils = [];
+
+      for (var student in studentsData) {
+        final teacher = student['teacher'];
+        final classroom = student['classroom'];
+        final studentId = student['studentId'] ?? '';
+        final classroomId = student['classroomId'] ?? '';
+
+        double totalFees = 0.0;
+        double totalPaid = 0.0;
+        double balance = 0.0;
+        double mandatoryDue = 0.0;
+        double optionalDue = 0.0;
+        List<Map<String, dynamic>> mandatoryFees = [];
+        List<Map<String, dynamic>> optionalFees = [];
+
+        final pending = pendingByStudent[studentId];
+        if (pending != null) {
+          mandatoryDue =
+              (pending['totalMandatoryDue'] as num?)?.toDouble() ?? 0.0;
+          optionalDue =
+              (pending['totalOptionalDue'] as num?)?.toDouble() ?? 0.0;
+          balance = (pending['totalDue'] as num?)?.toDouble() ?? 0.0;
+
+          mandatoryFees = ((pending['mandatoryFees'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          optionalFees = ((pending['optionalFees'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+
+          for (var f in [...mandatoryFees, ...optionalFees]) {
+            totalFees += (f['totalAmount'] as num?)?.toDouble() ?? 0.0;
+            totalPaid += (f['amountPaid'] as num?)?.toDouble() ?? 0.0;
+          }
+        }
+
+        mappedPupils.add({
+          'id': studentId,
+          'name':
+          '${student['firstname'] ?? ''} ${student['lastname'] ?? ''}'
+              .trim(),
+          'class': classroom?['name'] ?? student['classroomId'] ?? 'N/A',
+          'classroomId': classroomId,
+          'classroomName': classroom?['name'] ?? 'N/A',
+          'teacherId': teacher?['teacherId'] ?? '',
+          'teacherName': teacher != null
+              ? '${teacher['firstname'] ?? ''} ${teacher['lastname'] ?? ''}'
+              .trim()
+              : 'Not Assigned',
+          'teacherEmail': teacher?['email'] ?? 'Not available',
+          'teacherPhone': teacher?['phone'] ?? 'Not available',
+          'admissionNo': student['studentNo'] ?? '',
+          'totalFees': totalFees,
+          'totalPaid': totalPaid,
+          'balance': balance,
+          'mandatoryDue': mandatoryDue,
+          'optionalDue': optionalDue,
+          'mandatoryFees': mandatoryFees,
+          'optionalFees': optionalFees,
+          'feeStatus': totalFees == 0
+              ? 'Not Set'
+              : (balance <= 0 ? 'Cleared' : 'Pending'),
+          'averageScore': 0,
+          'attendance': 0,
         });
       }
+
+      if (mounted) {
+        setState(() {
+          _pupils = mappedPupils;
+          _filteredPupils = List.from(mappedPupils);
+          _totalOutstandingDue = grandTotalDue;
+        });
+      }
+
+      await _fetchWalletAndAccount(token);
+      await _fetchLoanData(token);
+      await _fetchAssignments(token);
+      await _fetchLoanApplications(token);
+      _fetchDiscountsForAllPupils(token);
+
+      if (mounted) setState(() => _isLoading = false);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -298,15 +291,14 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
 
   void _fetchDiscountsForAllPupils(String token) {
     try {
-      final discountProvider = Provider.of<DiscountProvider>(context, listen: false);
+      final discountProvider =
+      Provider.of<DiscountProvider>(context, listen: false);
       if (_pupils.isEmpty) return;
       discountProvider.fetchDiscountsForAllPupils(
         token: token,
         pupils: _pupils,
       );
-    } catch (e) {
-      // Silent fail
-    }
+    } catch (_) {}
   }
 
   void _filterPupils(String query) {
@@ -330,10 +322,12 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
 
   Future<void> _fetchWalletAndAccount(String token) async {
     try {
-      final accountResult = await _apiService.getGuardianSavingsAccount(
+      final accountResult = await _apiService
+          .getGuardianSavingsAccount(
         token: token,
         guardianId: _currentUser.id,
-      ).timeout(const Duration(seconds: 30));
+      )
+          .timeout(const Duration(seconds: 30));
 
       if (accountResult['success'] && mounted) {
         setState(() {
@@ -344,15 +338,11 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
           _ledgerBalance = accountResult['ledgerBalance'] ?? 0.0;
         });
       }
-    } catch (e) {
-      // Silent fail
-    }
+    } catch (_) {}
   }
 
   Future<void> _fetchLoanData(String token) async {
-    setState(() {
-      _isLoadingLoan = true;
-    });
+    setState(() => _isLoadingLoan = true);
     await Future.delayed(const Duration(milliseconds: 300));
     if (mounted) {
       setState(() {
@@ -365,40 +355,35 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
 
   Future<void> _fetchAssignments(String token) async {
     if (_pupils.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _isLoadingAssignments = false;
-        });
-      }
+      if (mounted) setState(() => _isLoadingAssignments = false);
       return;
     }
-
-    setState(() {
-      _isLoadingAssignments = true;
-    });
+    setState(() => _isLoadingAssignments = true);
 
     List<Map<String, dynamic>> allAssignments = [];
-
     for (var pupil in _pupils) {
       final classroomId = pupil['classroomId']?.toString();
-      if (classroomId != null && classroomId.isNotEmpty && classroomId != 'N/A') {
+      if (classroomId != null &&
+          classroomId.isNotEmpty &&
+          classroomId != 'N/A') {
         try {
-          final result = await _apiService.getAssignmentsByClassId(
+          final result = await _apiService
+              .getAssignmentsByClassId(
             token: token,
             classroomId: classroomId,
-          ).timeout(const Duration(seconds: 30));
+          )
+              .timeout(const Duration(seconds: 30));
 
           if (result['success'] && result['data'] != null) {
-            final assignments = List<Map<String, dynamic>>.from(result['data']);
+            final assignments =
+            List<Map<String, dynamic>>.from(result['data']);
             final className = pupil['class'] ?? 'N/A';
-            for (var assignment in assignments) {
-              assignment['className'] = className;
+            for (var a in assignments) {
+              a['className'] = className;
             }
             allAssignments.addAll(assignments);
           }
-        } catch (e) {
-          // Silent fail
-        }
+        } catch (_) {}
       }
     }
 
@@ -411,40 +396,53 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
   }
 
   Future<void> _fetchNews() async {
-    setState(() {
-      _isLoadingNews = true;
-    });
-
+    setState(() => _isLoadingNews = true);
     final token = Provider.of<AuthProvider>(context, listen: false).token;
 
     if (token != null) {
       try {
-        final newsResult = await _apiService.getAllNews(token: token).timeout(const Duration(seconds: 30));
+        final newsResult = await _apiService
+            .getAllNews(token: token)
+            .timeout(const Duration(seconds: 30));
         if (newsResult['success'] && mounted) {
-          final newsData = (newsResult['data'] as List?)?.map((item) => ({
+          final newsData = (newsResult['data'] as List?)
+              ?.map((item) => {
             'id': item['id'],
             'title': item['title'],
             'content': item['content'],
             'date': _formatDate(item['date']),
-          })).toList() ?? [];
+          })
+              .toList() ??
+              [];
           setState(() {
             _news = newsData;
             _isLoadingNews = false;
           });
         } else {
-          setState(() {
-            _isLoadingNews = false;
-          });
+          setState(() => _isLoadingNews = false);
         }
-      } catch (e) {
-        setState(() {
-          _isLoadingNews = false;
-        });
+      } catch (_) {
+        setState(() => _isLoadingNews = false);
       }
     } else {
-      setState(() {
-        _isLoadingNews = false;
-      });
+      setState(() => _isLoadingNews = false);
+    }
+  }
+
+  Future<void> _fetchUnreadMessages() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    if (token == null) return;
+
+    final result = await _apiService.getInboxMessages(
+      token: token,
+      userId: _currentUser.id,
+      userRole: 'Guardian',
+    );
+
+    if (result['success'] && mounted) {
+      final messages = result['data'] as List? ?? [];
+      final unreadCount = messages.where((m) => m['isRead'] == false).length;
+      if (mounted) setState(() => _unreadMessageCount = unreadCount);
     }
   }
 
@@ -452,116 +450,89 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
     if (dateValue == null) return 'Recent';
     try {
       DateTime dateTime = DateTime.parse(dateValue.toString());
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
+      ];
       return '${months[dateTime.month - 1]} ${dateTime.day}, ${dateTime.year}';
-    } catch (e) {
+    } catch (_) {
       return 'Recent';
     }
   }
 
   Future<void> _refreshData() async {
-    setState(() {
-      _isRefreshing = true;
-    });
+    setState(() => _isRefreshing = true);
     await _fetchDashboardData();
     await _fetchNews();
     await _fetchUnreadMessages();
-    if (mounted) {
-      setState(() {
-        _isRefreshing = false;
-      });
-    }
+    if (mounted) setState(() => _isRefreshing = false);
   }
 
-  // ==================== FEE PAYMENT METHODS ====================
+  // ==================== FEE GROUPING HELPERS ====================
 
-  Future<void> _payFeesForPupil(Map<String, dynamic> pupil) async {
+  Map<String, List<Map<String, dynamic>>> _groupFeesBySessionTerm(
+      List<Map<String, dynamic>> fees) {
+    final Map<String, List<Map<String, dynamic>>> groups = {};
+    for (var fee in fees) {
+      final session = fee['sessionId']?.toString() ?? 'Unknown';
+      final term = fee['termName']?.toString() ?? 'Unknown';
+      final key = '$session|$term';
+      groups.putIfAbsent(key, () => []).add(fee);
+    }
+    return groups;
+  }
+
+  bool _isCurrentSessionTerm(Map<String, dynamic> fee) {
+    final session = fee['sessionId']?.toString() ?? '';
+    final term = fee['termName']?.toString() ?? '';
+    final currentSession = _currentUser.sessionId ?? '';
+    final currentTerm = _currentUser.term ?? '';
+    return session == currentSession &&
+        term.toLowerCase().trim() == currentTerm.toLowerCase().trim();
+  }
+
+  // ==================== FEE PAYMENT ====================
+
+  Future<void> _payAllFeesForPupil(Map<String, dynamic> pupil) async {
     final studentId = pupil['id']?.toString();
     final classroomId = pupil['classroomId']?.toString();
     final studentName = pupil['name'] ?? 'Student';
     final studentClass = pupil['class'] ?? 'N/A';
 
-    double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
-
     if (studentId == null || studentId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student ID not available'), backgroundColor: AppColors.warning),
-      );
+      _showSnack('Student ID not available', AppColors.warning);
       return;
     }
-
     if (classroomId == null || classroomId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Classroom ID not available'), backgroundColor: AppColors.warning),
-      );
+      _showSnack('Classroom ID not available', AppColors.warning);
       return;
     }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
-      ),
-    );
+    final double balance = (pupil['balance'] as num?)?.toDouble() ?? 0.0;
 
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-    final String sessionId = _getCurrentSessionId();
-
-    try {
-      if (token != null && sessionId.isNotEmpty) {
-        final feeResult = await _apiService.getClassFeeForTerm(
-          token: token,
-          classId: classroomId,
-          sessionId: sessionId,
-        );
-
-        if (feeResult['success'] && feeResult['fee'] > 0) {
-          feeAmount = feeResult['fee'];
-          setState(() {
-            final index = _pupils.indexWhere((p) => p['id'] == studentId);
-            if (index != -1) {
-              _pupils[index]['feeAmount'] = feeAmount;
-              _filteredPupils[index]['feeAmount'] = feeAmount;
-            }
-          });
-        } else {
-          final studentFeeResult = await _apiService.getStudentFee(
-            token: token,
-            studentId: studentId,
-            sessionId: sessionId,
-          );
-          if (studentFeeResult['success'] && studentFeeResult['fee'] > 0) {
-            feeAmount = studentFeeResult['fee'];
-            setState(() {
-              final index = _pupils.indexWhere((p) => p['id'] == studentId);
-              if (index != -1) {
-                _pupils[index]['feeAmount'] = feeAmount;
-                _filteredPupils[index]['feeAmount'] = feeAmount;
-              }
-            });
-          }
-        }
-      }
-    } catch (e) {
-      print('⚠️ Error fetching fee: $e');
-    } finally {
-      Navigator.pop(context);
-    }
-
-    if (feeAmount <= 0) {
+    if (balance <= 0) {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('No Fee Available', style: TextStyle(color: AppColors.warning)),
+          title: const Text('No Outstanding Balance',
+              style: TextStyle(color: AppColors.success)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.info_outline, size: 48, color: AppColors.warning),
+              const Icon(Icons.check_circle,
+                  size: 48, color: AppColors.success),
               const SizedBox(height: 16),
-              Text('No fee amount has been set for $studentName.'),
-              const SizedBox(height: 12),
-              const Text('Please contact the school administrator to set the fee amount.'),
+              Text('$studentName has no outstanding fees.'),
             ],
           ),
           actions: [
@@ -583,138 +554,1177 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
           studentName: studentName,
           studentClass: studentClass,
           classroomId: classroomId,
-          originalFee: feeAmount,
-          sessionId: sessionId,
+          originalFee: balance,
+          sessionId: _currentUser.sessionId ?? '',
         ),
       ),
-    );
+    ).then((_) => _refreshData());
   }
 
-  // ==================== PUPIL DETAILS DIALOG ====================
+  Future<void> _payIndividualFee({
+    required Map<String, dynamic> pupil,
+    required Map<String, dynamic> fee,
+  }) async {
+    final studentId = pupil['id']?.toString();
+    final classroomId = pupil['classroomId']?.toString();
+    final studentName = pupil['name'] ?? 'Student';
+    final studentClass = pupil['class'] ?? 'N/A';
 
-  void _showPupilDetails(Map<String, dynamic> pupil) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-    final bool hasPhone = pupil['teacherPhone'] != null &&
-        pupil['teacherPhone'].toString().isNotEmpty &&
-        pupil['teacherPhone'] != 'N/A' &&
-        pupil['teacherPhone'] != 'Not available';
+    final feeId = fee['feeId']?.toString() ?? '';
+    final feeName = fee['feeName']?.toString() ?? 'Fee';
+    final feeType = fee['feeType']?.toString() ?? '';
+    final termName = fee['termName']?.toString() ?? '';
+    final balance = (fee['balance'] as num?)?.toDouble() ?? 0.0;
 
-    double feeAmount = pupil['feeAmount'] as double? ?? 0.0;
+    if (studentId == null || studentId.isEmpty) {
+      _showSnack('Student ID not available', AppColors.warning);
+      return;
+    }
+    if (classroomId == null || classroomId.isEmpty) {
+      _showSnack('Classroom ID not available', AppColors.warning);
+      return;
+    }
+    if (balance <= 0) {
+      _showSnack('This fee is already cleared', AppColors.success);
+      return;
+    }
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        titlePadding: const EdgeInsets.all(16),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                pupil['name'],
-                style: const TextStyle(color: AppColors.primary, fontSize: 16),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FeePaymentScreen(
+          studentId: studentId,
+          studentName: studentName,
+          studentClass: studentClass,
+          classroomId: classroomId,
+          originalFee: balance,
+          sessionId: fee['sessionId']?.toString() ?? '',
+          feeId: feeId,
+          feeType: feeType,
+          feeName: feeName,
+          termName: termName,
         ),
-        content: Container(
-          width: double.maxFinite,
+      ),
+    ).then((_) => _refreshData());
+  }
+
+  // ==================== FEES SCREEN ====================
+
+  void _showFeesScreen() {
+    if (_pupils.isEmpty) {
+      _showSnack('No pupils found', AppColors.warning);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Student Information',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Outstanding Fees',
+                      style: TextStyle(
+                        fontSize: _resp.isVerySmall ? 18 : 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
-                    const SizedBox(height: 8),
-                    _buildInfoRow('Admission No', pupil['admissionNo'] ?? 'N/A'),
-                    _buildInfoRow('Class', pupil['class'] ?? 'N/A'),
-                    _buildInfoRow(
-                      'Fee',
-                      feeAmount > 0 ? '₦${feeAmount.toStringAsFixed(2)}' : 'Not Set',
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // Grand Total Card
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: AppColors.cardGradient,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withOpacity(0.3),
+                      blurRadius: 10,
                     ),
                   ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet,
+                        color: AppColors.white, size: _resp.iconSize),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Total Outstanding',
+                            style: TextStyle(
+                              fontSize: _resp.smallCaptionSize,
+                              color: AppColors.white.withOpacity(0.9),
+                            ),
+                          ),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '₦${_totalOutstandingDue.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: _resp.isVerySmall ? 22 : 28,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'Fees are grouped by academic session and term. Pay each fee individually or use "Pay All".',
+                  style: TextStyle(
+                    fontSize: _resp.smallCaptionSize,
+                    color: AppColors.textSecondary,
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.info.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Teacher Information',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                    const SizedBox(height: 8),
-                    _buildInfoRow('Name', pupil['teacherName'] ?? 'N/A'),
-                    _buildInfoRow('Email', pupil['teacherEmail'] ?? 'N/A'),
-                    _buildInfoRow('Phone', pupil['teacherPhone'] ?? 'N/A'),
-                  ],
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: _pupils.length,
+                  itemBuilder: (context, index) =>
+                      _buildPupilFeesExpandableCard(_pupils[index]),
                 ),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+      ),
+    );
+  }
+
+  Widget _buildPupilFeesExpandableCard(Map<String, dynamic> pupil) {
+    final List<Map<String, dynamic>> mandatory =
+        (pupil['mandatoryFees'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final List<Map<String, dynamic>> optional =
+        (pupil['optionalFees'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final double total = (pupil['balance'] as num?)?.toDouble() ?? 0.0;
+    final bool hasAnyFees = mandatory.isNotEmpty || optional.isNotEmpty;
+
+    // Group by session + term
+    final mandatoryGroups = _groupFeesBySessionTerm(mandatory);
+    final optionalGroups = _groupFeesBySessionTerm(optional);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradientLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hasAnyFees
+              ? AppColors.warning.withOpacity(0.3)
+              : AppColors.success.withOpacity(0.3),
+        ),
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        tilePadding: EdgeInsets.symmetric(
+            horizontal: _resp.isVerySmall ? 8 : 12, vertical: 4),
+        childrenPadding: EdgeInsets.fromLTRB(
+            _resp.isVerySmall ? 8 : 12, 0, _resp.isVerySmall ? 8 : 12, 12),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        leading: CircleAvatar(
+          radius: _resp.isVerySmall ? 16 : 22,
+          backgroundColor: AppColors.primary.withOpacity(0.1),
+          child: Text(
+            (pupil['name'] as String)[0].toUpperCase(),
+            style: TextStyle(
+              color: AppColors.primary,
+              fontWeight: FontWeight.bold,
+              fontSize: _resp.isVerySmall ? 13 : 16,
+            ),
           ),
-          if (hasPhone)
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _makePhoneCall(pupil['teacherPhone']);
-              },
-              icon: const Icon(Icons.phone, size: 18),
-              label: const Text('Call'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.success,
-                foregroundColor: Colors.white,
+        ),
+        title: Text(
+          pupil['name'],
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: _resp.isVerySmall ? 13 : 15,
+            color: AppColors.textPrimary,
+          ),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              pupil['class'],
+              style: TextStyle(
+                  fontSize: _resp.smallCaptionSize,
+                  color: AppColors.textSecondary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+            Text(
+              total > 0
+                  ? 'Total due: ₦${total.toStringAsFixed(2)}'
+                  : 'Fully cleared ✅',
+              style: TextStyle(
+                fontSize: _resp.smallCaptionSize,
+                color: total > 0 ? AppColors.warning : AppColors.success,
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ],
+        ),
+        trailing: Icon(
+          total > 0 ? Icons.warning_amber_rounded : Icons.check_circle,
+          color: total > 0 ? AppColors.warning : AppColors.success,
+          size: _resp.iconSize,
+        ),
+        children: [
+          if (!hasAnyFees)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                'No outstanding fees for this child.',
+                style: TextStyle(
+                    fontSize: _resp.smallTextSize,
+                    color: AppColors.textSecondary),
               ),
             ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              _startConversationWithTeacher(pupil);
-            },
-            icon: const Icon(Icons.message, size: 18),
-            label: const Text('Message'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+          if (mandatory.isNotEmpty) ...[
+            _buildFeeTypeHeader('Mandatory Fees', AppColors.primary,
+                pupil['mandatoryDue']),
+            const SizedBox(height: 6),
+            ..._buildSessionTermGroups(
+              pupil: pupil,
+              groups: mandatoryGroups,
+              isMandatory: true,
             ),
+          ],
+          if (optional.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildFeeTypeHeader(
+                'Optional Fees', AppColors.info, pupil['optionalDue']),
+            const SizedBox(height: 6),
+            ..._buildSessionTermGroups(
+              pupil: pupil,
+              groups: optionalGroups,
+              isMandatory: false,
+            ),
+          ],
+          if (total > 0) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _payAllFeesForPupil(pupil);
+                },
+                icon: Icon(Icons.payment, size: _resp.smallIconSize),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Pay All — ₦${total.toStringAsFixed(2)}',
+                    style: TextStyle(
+                        fontSize: _resp.buttonTextSize,
+                        fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(
+                      vertical: _resp.isMobile ? 10 : 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeeTypeHeader(String title, Color color, dynamic due) {
+    final double amount = (due as num?)?.toDouble() ?? 0.0;
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: _resp.smallTextSize,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+        if (amount > 0)
+          Text(
+            'Due ₦${amount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: _resp.smallCaptionSize,
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _buildSessionTermGroups({
+    required Map<String, dynamic> pupil,
+    required Map<String, List<Map<String, dynamic>>> groups,
+    required bool isMandatory,
+  }) {
+    final List<Widget> widgets = [];
+
+    final sortedKeys = groups.keys.toList();
+    sortedKeys.sort((a, b) {
+      final feeA = groups[a]!.first;
+      final feeB = groups[b]!.first;
+      final isCurrentA = _isCurrentSessionTerm(feeA);
+      final isCurrentB = _isCurrentSessionTerm(feeB);
+      if (isCurrentA && !isCurrentB) return -1;
+      if (!isCurrentA && isCurrentB) return 1;
+      return 0;
+    });
+
+    for (var key in sortedKeys) {
+      final fees = groups[key]!;
+      if (fees.isEmpty) continue;
+
+      final sampleFee = fees.first;
+      final session = sampleFee['sessionId']?.toString() ?? '';
+      final term = sampleFee['termName']?.toString() ?? '';
+      final isCurrent = _isCurrentSessionTerm(sampleFee);
+
+      final groupTotal = fees.fold<double>(
+        0.0,
+            (sum, f) => sum + ((f['balance'] as num?)?.toDouble() ?? 0.0),
+      );
+
+      final headerColor = isCurrent
+          ? (isMandatory ? AppColors.primary : AppColors.info)
+          : AppColors.warning;
+
+      final headerLabel = isCurrent
+          ? 'Current — $session • $term'
+          : 'Outstanding — $session • $term';
+
+      widgets.add(
+        Container(
+          margin: const EdgeInsets.only(bottom: 6, top: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: headerColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: headerColor.withOpacity(0.25)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isCurrent ? Icons.event_available : Icons.history,
+                size: _resp.smallIconSize,
+                color: headerColor,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  headerLabel,
+                  style: TextStyle(
+                    fontSize: _resp.smallTextSize,
+                    fontWeight: FontWeight.bold,
+                    color: headerColor,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+              if (groupTotal > 0)
+                Text(
+                  '₦${groupTotal.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: _resp.smallTextSize,
+                    fontWeight: FontWeight.bold,
+                    color: headerColor,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+
+      for (var fee in fees) {
+        widgets.add(_buildPayableFeeCard(
+          pupil: pupil,
+          fee: fee,
+          isMandatory: isMandatory,
+          isOutstandingPrevious: !isCurrent,
+        ));
+      }
+    }
+
+    return widgets;
+  }
+
+  Widget _buildPayableFeeCard({
+    required Map<String, dynamic> pupil,
+    required Map<String, dynamic> fee,
+    required bool isMandatory,
+    bool isOutstandingPrevious = false,
+  }) {
+    final name = fee['feeName'] ?? 'Fee';
+    final type = fee['feeType'] ?? '';
+    final totalAmount = (fee['totalAmount'] as num?)?.toDouble() ?? 0.0;
+    final amountPaid = (fee['amountPaid'] as num?)?.toDouble() ?? 0.0;
+    final balance = (fee['balance'] as num?)?.toDouble() ?? 0.0;
+    final term = fee['termName'] ?? '';
+    final session = fee['sessionId'] ?? '';
+    final isCleared = balance <= 0;
+
+    final String typeLabel = type == 'ClassFee'
+        ? 'Tuition Fee'
+        : type == 'OtherFee'
+        ? 'Other Fee'
+        : type.isNotEmpty
+        ? type
+        : 'Fee';
+
+    final baseColor = isMandatory ? AppColors.primary : AppColors.info;
+    final color = isOutstandingPrevious ? AppColors.warning : baseColor;
+    final statusColor = isCleared ? AppColors.success : color;
+
+    final String subtitleLine = [
+      if (name.isNotEmpty && name != typeLabel) name,
+      if (session.isNotEmpty) session,
+      if (term.isNotEmpty) term,
+    ].join(' • ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCleared
+            ? AppColors.success.withOpacity(0.05)
+            : color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isCleared
+              ? AppColors.success.withOpacity(0.3)
+              : color.withOpacity(0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Icon(
+                            type == 'ClassFee'
+                                ? Icons.school
+                                : type == 'OtherFee'
+                                ? Icons.receipt_long
+                                : Icons.payments,
+                            size: _resp.smallIconSize,
+                            color: color,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            typeLabel,
+                            style: TextStyle(
+                              fontSize: _resp.isVerySmall ? 13 : 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                        if (isOutstandingPrevious)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.warning.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'OUTSTANDING',
+                              style: TextStyle(
+                                fontSize: _resp.smallCaptionSize,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.warning,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (subtitleLine.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 34, top: 2),
+                        child: Text(
+                          subtitleLine,
+                          style: TextStyle(
+                            fontSize: _resp.smallCaptionSize,
+                            color: AppColors.textSecondary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    isCleared ? 'Paid ✅' : '₦${balance.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: _resp.isVerySmall ? 13 : 15,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
+                  ),
+                  if (!isCleared)
+                    Text(
+                      'of ₦${totalAmount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: _resp.smallCaptionSize,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: totalAmount > 0
+                  ? (amountPaid / totalAmount).clamp(0, 1)
+                  : 0,
+              minHeight: 5,
+              backgroundColor: AppColors.greyLight,
+              valueColor: AlwaysStoppedAnimation(statusColor),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Paid: ₦${amountPaid.toStringAsFixed(2)} / ₦${totalAmount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: _resp.smallCaptionSize,
+              color: AppColors.textSecondary,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+          if (!isCleared) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _payIndividualFee(pupil: pupil, fee: fee);
+                },
+                icon: Icon(Icons.payment, size: _resp.smallIconSize),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Pay ₦${balance.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: _resp.buttonTextSize,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(
+                      vertical: _resp.isMobile ? 8 : 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ==================== PUPIL DETAILS ====================
+
+  void _showPupilDetails(Map<String, dynamic> pupil) {
+    final bool hasPhone = pupil['teacherPhone'] != null &&
+        pupil['teacherPhone'].toString().isNotEmpty &&
+        pupil['teacherPhone'] != 'N/A' &&
+        pupil['teacherPhone'] != 'Not available';
+
+    final List<Map<String, dynamic>> mandatoryFees =
+        (pupil['mandatoryFees'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final List<Map<String, dynamic>> optionalFees =
+        (pupil['optionalFees'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final double totalFees = (pupil['totalFees'] as num?)?.toDouble() ?? 0.0;
+    final double totalPaid = (pupil['totalPaid'] as num?)?.toDouble() ?? 0.0;
+    final double balance = (pupil['balance'] as num?)?.toDouble() ?? 0.0;
+    final bool hasFee = totalFees > 0;
+    final bool isCleared = hasFee && balance <= 0;
+    final double percentagePaid =
+    hasFee ? ((totalPaid / totalFees) * 100).clamp(0, 100) : 0;
+
+    final mandatoryGroups = _groupFeesBySessionTerm(mandatoryFees);
+    final optionalGroups = _groupFeesBySessionTerm(optionalFees);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        titlePadding: EdgeInsets.all(_resp.isVerySmall ? 12 : 16),
+        title: Text(
+          pupil['name'],
+          style: const TextStyle(color: AppColors.primary, fontSize: 16),
+          overflow: TextOverflow.ellipsis,
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Student Information',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      _buildInfoRow(
+                          'Admission No', pupil['admissionNo'] ?? 'N/A'),
+                      _buildInfoRow('Class', pupil['class'] ?? 'N/A'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Summary
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isCleared
+                        ? AppColors.success.withOpacity(0.08)
+                        : AppColors.warning.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isCleared
+                          ? AppColors.success.withOpacity(0.3)
+                          : AppColors.warning.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isCleared
+                                ? Icons.check_circle
+                                : Icons.receipt_long,
+                            color: isCleared
+                                ? AppColors.success
+                                : AppColors.warning,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          const Flexible(
+                            child: Text(
+                              'Fee Summary',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (hasFee) ...[
+                        _buildFeeLine('Total Fee',
+                            '₦${totalFees.toStringAsFixed(2)}',
+                            AppColors.textSecondary),
+                        _buildFeeLine('Total Paid',
+                            '₦${totalPaid.toStringAsFixed(2)}',
+                            AppColors.success),
+                        const Divider(height: 12),
+                        _buildFeeLine(
+                          isCleared ? 'Status' : 'Outstanding',
+                          isCleared
+                              ? 'Cleared ✅'
+                              : '₦${balance.toStringAsFixed(2)}',
+                          isCleared
+                              ? AppColors.success
+                              : AppColors.warning,
+                          bold: true,
+                        ),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: percentagePaid / 100,
+                            minHeight: 8,
+                            backgroundColor: AppColors.greyLight,
+                            valueColor: AlwaysStoppedAnimation(
+                              isCleared
+                                  ? AppColors.success
+                                  : AppColors.warning,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${percentagePaid.toStringAsFixed(0)}% paid',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary),
+                        ),
+                      ] else
+                        const Text(
+                          'No fee has been set for this term.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // Grouped fees
+                if (mandatoryFees.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _buildDialogSectionHeader(
+                      'Mandatory Fees', AppColors.primary),
+                  const SizedBox(height: 6),
+                  ..._buildDialogSessionGroups(
+                    pupil: pupil,
+                    groups: mandatoryGroups,
+                    isMandatory: true,
+                  ),
+                ],
+                if (optionalFees.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _buildDialogSectionHeader(
+                      'Optional Fees', AppColors.info),
+                  const SizedBox(height: 6),
+                  ..._buildDialogSessionGroups(
+                    pupil: pupil,
+                    groups: optionalGroups,
+                    isMandatory: false,
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.info.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Teacher Information',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      _buildInfoRow(
+                          'Name', pupil['teacherName'] ?? 'N/A'),
+                      _buildInfoRow(
+                          'Email', pupil['teacherEmail'] ?? 'N/A'),
+                      _buildInfoRow(
+                          'Phone', pupil['teacherPhone'] ?? 'N/A'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actionsPadding: EdgeInsets.symmetric(
+            horizontal: _resp.isVerySmall ? 8 : 16, vertical: 8),
+        actions: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            alignment: WrapAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+              if (hasFee && !isCleared)
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _payAllFeesForPupil(pupil);
+                  },
+                  icon: const Icon(Icons.payment, size: 16),
+                  label: Text('Pay All ₦${balance.toStringAsFixed(0)}',
+                      style: const TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              if (hasPhone)
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _makePhoneCall(pupil['teacherPhone']);
+                  },
+                  icon: const Icon(Icons.phone, size: 16),
+                  label: const Text('Call',
+                      style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _startConversationWithTeacher(pupil);
+                },
+                icon: const Icon(Icons.message, size: 16),
+                label: const Text('Message',
+                    style: TextStyle(fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ==================== FUND WALLET DIALOG ====================
+  Widget _buildDialogSectionHeader(String title, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 14,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildDialogSessionGroups({
+    required Map<String, dynamic> pupil,
+    required Map<String, List<Map<String, dynamic>>> groups,
+    required bool isMandatory,
+  }) {
+    final List<Widget> widgets = [];
+
+    final sortedKeys = groups.keys.toList();
+    sortedKeys.sort((a, b) {
+      final feeA = groups[a]!.first;
+      final feeB = groups[b]!.first;
+      final isCurrentA = _isCurrentSessionTerm(feeA);
+      final isCurrentB = _isCurrentSessionTerm(feeB);
+      if (isCurrentA && !isCurrentB) return -1;
+      if (!isCurrentA && isCurrentB) return 1;
+      return 0;
+    });
+
+    for (var key in sortedKeys) {
+      final fees = groups[key]!;
+      if (fees.isEmpty) continue;
+
+      final sampleFee = fees.first;
+      final session = sampleFee['sessionId']?.toString() ?? '';
+      final term = sampleFee['termName']?.toString() ?? '';
+      final isCurrent = _isCurrentSessionTerm(sampleFee);
+
+      final headerColor = isCurrent
+          ? (isMandatory ? AppColors.primary : AppColors.info)
+          : AppColors.warning;
+
+      widgets.add(
+        Container(
+          margin: const EdgeInsets.only(bottom: 6, top: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: headerColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isCurrent ? Icons.event_available : Icons.history,
+                size: 12,
+                color: headerColor,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isCurrent
+                      ? 'Current — $session • $term'
+                      : 'Outstanding — $session • $term',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: headerColor,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      for (var fee in fees) {
+        widgets.add(_buildDialogFeeItem(
+          pupil: pupil,
+          fee: fee,
+          isMandatory: isMandatory,
+          isOutstandingPrevious: !isCurrent,
+        ));
+      }
+    }
+
+    return widgets;
+  }
+
+  Widget _buildDialogFeeItem({
+    required Map<String, dynamic> pupil,
+    required Map<String, dynamic> fee,
+    required bool isMandatory,
+    bool isOutstandingPrevious = false,
+  }) {
+    final name = fee['feeName'] ?? 'Fee';
+    final type = fee['feeType'] ?? '';
+    final totalAmount = (fee['totalAmount'] as num?)?.toDouble() ?? 0.0;
+    final amountPaid = (fee['amountPaid'] as num?)?.toDouble() ?? 0.0;
+    final balance = (fee['balance'] as num?)?.toDouble() ?? 0.0;
+    final term = fee['termName'] ?? '';
+    final session = fee['sessionId'] ?? '';
+    final isCleared = balance <= 0;
+
+    final String typeLabel = type == 'ClassFee'
+        ? 'Tuition Fee'
+        : type == 'OtherFee'
+        ? 'Other Fee'
+        : type.isNotEmpty
+        ? type
+        : 'Fee';
+
+    final baseColor = isMandatory ? AppColors.primary : AppColors.info;
+    final color = isOutstandingPrevious ? AppColors.warning : baseColor;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isCleared
+            ? AppColors.success.withOpacity(0.05)
+            : color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isCleared
+              ? AppColors.success.withOpacity(0.3)
+              : color.withOpacity(0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    if (name.isNotEmpty && name != typeLabel)
+                      Text(
+                        name,
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.textSecondary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    if (session.isNotEmpty || term.isNotEmpty)
+                      Text(
+                        '$session${session.isNotEmpty && term.isNotEmpty ? ' • ' : ''}$term',
+                        style: const TextStyle(
+                            fontSize: 10, color: AppColors.textSecondary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isCleared ? 'Paid ✅' : '₦${balance.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: isCleared ? AppColors.success : color,
+                ),
+              ),
+            ],
+          ),
+          if (!isCleared) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Paid: ₦${amountPaid.toStringAsFixed(2)} / ₦${totalAmount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                        fontSize: 10, color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 28,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _payIndividualFee(pupil: pupil, fee: fee);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6)),
+                      minimumSize: Size.zero,
+                    ),
+                    child: const Text('Pay',
+                        style: TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ==================== DIALOGS ====================
 
   void _showFundWalletDialog() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Fund Wallet', style: TextStyle(color: AppColors.primary)),
+        title: const Text('Fund Wallet',
+            style: TextStyle(color: AppColors.primary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Send payment to:'),
             const SizedBox(height: 12),
@@ -726,17 +1736,19 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
               ),
               child: Column(
                 children: [
-                  _buildInfoRow('Account Name', _accountName.isNotEmpty ? _accountName : 'N/A'),
-                  _buildInfoRow('Account Number', _accountNumber.isNotEmpty ? _accountNumber : 'N/A'),
-                  _buildInfoRow('Bank Name', _bankName.isNotEmpty ? _bankName : 'N/A'),
+                  _buildInfoRow('Account Name',
+                      _accountName.isNotEmpty ? _accountName : 'N/A'),
+                  _buildInfoRow('Account Number',
+                      _accountNumber.isNotEmpty ? _accountNumber : 'N/A'),
+                  _buildInfoRow('Bank Name',
+                      _bankName.isNotEmpty ? _bankName : 'N/A'),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            Text(
+            const Text(
               'Make a transfer to the above account. Your wallet will be credited automatically.',
-              style: TextStyle(fontSize: isSmallScreen ? 11 : 12, color: AppColors.textSecondary),
-              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
           ],
         ),
@@ -747,21 +1759,15 @@ class _GuardianDashboardState extends State<GuardianDashboard> with AutomaticKee
           ),
           ElevatedButton(
             onPressed: () {
-              String accountDetails = '''
-Account Name: ${_accountName.isNotEmpty ? _accountName : 'N/A'}
-Account Number: ${_accountNumber.isNotEmpty ? _accountNumber : 'N/A'}
-Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
-''';
-              Clipboard.setData(ClipboardData(text: accountDetails));
+              final details = 'Account Name: $_accountName\n'
+                  'Account Number: $_accountNumber\n'
+                  'Bank Name: $_bankName';
+              Clipboard.setData(ClipboardData(text: details));
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Account details copied!'),
-                  backgroundColor: AppColors.success,
-                ),
-              );
+              _showSnack('Account details copied!', AppColors.success);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            style:
+            ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
             child: const Text('Copy Details'),
           ),
         ],
@@ -770,19 +1776,20 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showWithdrawDialog() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
     final amountController = TextEditingController();
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Withdraw Funds', style: TextStyle(color: AppColors.primary)),
+        title: const Text('Withdraw Funds',
+            style: TextStyle(color: AppColors.primary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Available Balance: ₦${_walletBalance.toStringAsFixed(2)}',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: isSmallScreen ? 13 : 14),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -793,11 +1800,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                 prefixText: '₦',
                 border: OutlineInputBorder(),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Funds will be transferred to your registered bank account.',
-              style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: AppColors.grey),
             ),
           ],
         ),
@@ -811,19 +1813,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               final amount = double.tryParse(amountController.text) ?? 0;
               if (amount > 0 && amount <= _walletBalance) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Withdrawal of ₦${amount.toStringAsFixed(2)} initiated!'),
-                    backgroundColor: AppColors.success,
-                  ),
-                );
+                _showSnack(
+                    'Withdrawal of ₦${amount.toStringAsFixed(2)} initiated!',
+                    AppColors.success);
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Invalid amount or insufficient balance'),
-                    backgroundColor: AppColors.error,
-                  ),
-                );
+                _showSnack('Invalid amount or insufficient balance',
+                    AppColors.error);
               }
             },
             style: ElevatedButton.styleFrom(
@@ -837,34 +1832,26 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== NEWS DETAILS ====================
-
   void _showNewsDetails(Map<String, dynamic> news) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          news['title'],
-          style: const TextStyle(color: AppColors.primary, fontSize: 16),
-        ),
+        title: Text(news['title'],
+            style:
+            const TextStyle(color: AppColors.primary, fontSize: 16)),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Date: ${news['date']}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              Text('Date: ${news['date']}',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500)),
               const SizedBox(height: 12),
-              Text(
-                news['content'] ?? 'No content available',
-                style: const TextStyle(fontSize: 13),
-              ),
+              Text(news['content'] ?? 'No content available',
+                  style: const TextStyle(fontSize: 13)),
             ],
           ),
         ),
@@ -878,9 +1865,9 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  void _showAllNews() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+  // ==================== SHEETS ====================
 
+  void _showAllNews() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -893,13 +1880,14 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 16),
           child: Column(
             children: [
-              const Text(
-                'All News',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
-              ),
+              const Text('All News',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary)),
               const SizedBox(height: 16),
               Expanded(
                 child: _news.isEmpty
@@ -912,8 +1900,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     return Card(
                       child: ListTile(
                         dense: true,
-                        title: Text(item['title'], style: const TextStyle(fontSize: 13)),
-                        subtitle: Text(item['date'], style: const TextStyle(fontSize: 11)),
+                        title: Text(item['title'],
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1),
+                        subtitle: Text(item['date'],
+                            style: const TextStyle(fontSize: 11)),
                         onTap: () {
                           Navigator.pop(context);
                           _showNewsDetails(item);
@@ -931,8 +1923,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showAllAssignments() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -945,20 +1935,20 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'All Assignments',
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 20 : 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
+                  const Expanded(
+                    child: Text('All Assignments',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -966,18 +1956,19 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               Expanded(
                 child: _isLoadingAssignments
-                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    ? const Center(
+                    child: CircularProgressIndicator(
+                        color: AppColors.primary))
                     : _assignments.isEmpty
                     ? const Center(child: Text('No assignments yet'))
                     : ListView.builder(
                   controller: scrollController,
                   itemCount: _assignments.length,
-                  itemBuilder: (context, index) {
-                    return _buildAssignmentItem(_assignments[index]);
-                  },
+                  itemBuilder: (context, index) =>
+                      _buildAssignmentItem(_assignments[index]),
                 ),
               ),
             ],
@@ -988,8 +1979,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showAllLoanApplications() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1002,20 +1991,20 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
+          padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'All Loan Applications',
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 20 : 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
+                  const Expanded(
+                    child: Text('All Loan Applications',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -1023,19 +2012,21 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               Expanded(
                 child: _loanProvider.isLoading
-                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    ? const Center(
+                    child: CircularProgressIndicator(
+                        color: AppColors.primary))
                     : _loanProvider.applications.isEmpty
-                    ? const Center(child: Text('No loan applications yet'))
+                    ? const Center(
+                    child: Text('No loan applications yet'))
                     : ListView.builder(
                   controller: scrollController,
                   itemCount: _loanProvider.applications.length,
-                  itemBuilder: (context, index) {
-                    final application = _loanProvider.applications[index];
-                    return _buildLoanApplicationTile(application);
-                  },
+                  itemBuilder: (context, index) =>
+                      _buildLoanApplicationTile(
+                          _loanProvider.applications[index]),
                 ),
               ),
             ],
@@ -1046,8 +2037,6 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showLoanDetails() {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1064,36 +2053,41 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Loan Details',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
-              ),
+              const Text('Loan Details',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary)),
               const SizedBox(height: 16),
               Expanded(
                 child: ListView(
                   controller: scrollController,
                   children: [
-                    _buildInfoRow('Total Loan Amount', '₦${_loanBalance.toStringAsFixed(2)}'),
-                    _buildInfoRow('Loan Balance', '₦${_loanBalance.toStringAsFixed(2)}'),
+                    _buildInfoRow('Total Loan Amount',
+                        '₦${_loanBalance.toStringAsFixed(2)}'),
+                    _buildInfoRow('Loan Balance',
+                        '₦${_loanBalance.toStringAsFixed(2)}'),
                     _buildInfoRow('Active Loans', '$_activeLoans'),
                     const Divider(height: 24),
-                    const Text(
-                      'Loan Applications',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    const Text('Loan Applications',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     if (_loanProvider.applications.isEmpty)
                       const Text('No loan applications yet')
                     else
                       ..._loanProvider.applications.map((app) => ListTile(
                         dense: true,
-                        title: Text(app.statusDisplay, style: const TextStyle(fontSize: 13)),
-                        subtitle: Text('ID: ${app.id.length > 8 ? app.id.substring(0, 8) : app.id}', style: const TextStyle(fontSize: 11)),
-                        trailing: Icon(app.statusIcon, color: app.statusColor),
+                        title: Text(app.statusDisplay,
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1),
+                        subtitle: Text(
+                          'ID: ${app.id.length > 8 ? app.id.substring(0, 8) : app.id}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        trailing: Icon(app.statusIcon,
+                            color: app.statusColor),
                         onTap: () {
                           Navigator.pop(context);
                           _navigateToLoanApplication(app);
@@ -1120,403 +2114,175 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== OTHER FEES METHODS ====================
-
-  void _showOtherFeesScreen() {
+  void _showResultsScreen() {
     if (_pupils.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
-      );
+      _showSnack('No pupils found', AppColors.warning);
       return;
     }
 
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-    );
-
-    _fetchOtherFeesForAllPupils(() {
-      Navigator.pop(context);
-
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (context) => DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.4,
-          maxChildSize: 0.95,
-          expand: false,
-          builder: (context, scrollController) => Container(
-            padding: EdgeInsets.all(isSmallScreen ? 12 : 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Other Fees',
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 20 : 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.close, size: isSmallScreen ? 20 : 24),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Additional school fees for your children',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 12 : 14,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: _isLoadingOtherFees
-                      ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                      : _otherFeesErrorMessage != null
-                      ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.error_outline, size: 48, color: AppColors.error),
-                        const SizedBox(height: 12),
-                        Text(
-                          _otherFeesErrorMessage!,
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 14 : 16,
-                            color: AppColors.textSecondary,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _showOtherFeesScreen();
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  )
-                      : _otherFees.isEmpty
-                      ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: isSmallScreen ? 48 : 64,
-                          color: AppColors.grey,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No other fees found',
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 14 : 16,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'There are no additional fees for your children',
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 12 : 13,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                      : ListView.builder(
-                    controller: scrollController,
-                    itemCount: _pupils.length,
-                    itemBuilder: (context, index) {
-                      final pupil = _pupils[index];
-                      return _buildPupilOtherFeesCard(pupil, isSmallScreen);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    });
-  }
-
-  Future<void> _fetchOtherFeesForAllPupils(VoidCallback onComplete) async {
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-    if (token == null) {
-      setState(() {
-        _otherFeesErrorMessage = 'Authentication error';
-        _isLoadingOtherFees = false;
-      });
-      onComplete();
-      return;
-    }
-
-    setState(() {
-      _isLoadingOtherFees = true;
-      _otherFeesErrorMessage = null;
-      _otherFees = [];
-      _totalOtherFees = 0.0;
-    });
-
-    final Set<String> classroomIds = {};
-    for (var pupil in _pupils) {
-      final classroomId = pupil['classroomId']?.toString();
-      if (classroomId != null && classroomId.isNotEmpty && classroomId != 'N/A') {
-        classroomIds.add(classroomId);
-      }
-    }
-
-    if (classroomIds.isEmpty) {
-      setState(() {
-        _isLoadingOtherFees = false;
-        _otherFeesErrorMessage = 'No classroom IDs available';
-      });
-      onComplete();
-      return;
-    }
-
-    List<Map<String, dynamic>> allFees = [];
-    double totalAmount = 0.0;
-
-    for (var classroomId in classroomIds) {
-      try {
-        final result = await _apiService.getOtherFeesByClassroom(
-          token: token,
-          classroomId: classroomId,
-          activeOnly: true,
-        );
-
-        if (result['success']) {
-          final fees = List<Map<String, dynamic>>.from(result['fees']);
-          for (var fee in fees) {
-            final pupil = _pupils.firstWhere(
-                  (p) => p['classroomId']?.toString() == classroomId,
-              orElse: () => {},
-            );
-            fee['studentName'] = pupil['name'] ?? 'Unknown';
-            fee['className'] = pupil['class'] ?? 'N/A';
-            fee['studentId'] = pupil['id'] ?? '';
-          }
-          allFees.addAll(fees);
-          totalAmount += result['totalAmount'] ?? 0.0;
-        }
-      } catch (e) {
-        print('Error fetching other fees for classroom $classroomId: $e');
-      }
-    }
-
-    setState(() {
-      _otherFees = allFees;
-      _totalOtherFees = totalAmount;
-      _isLoadingOtherFees = false;
-    });
-
-    onComplete();
-  }
-
-  Widget _buildPupilOtherFeesCard(Map<String, dynamic> pupil, bool isSmallScreen) {
-    final pupilFees = _otherFees.where((fee) =>
-    fee['studentId'] == pupil['id'] ||
-        fee['studentName'] == pupil['name']).toList();
-
-    final totalPupilFees = pupilFees.fold(0.0, (sum, fee) => sum + (fee['amount'] as double));
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
-      decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: pupilFees.isNotEmpty ? AppColors.primary.withOpacity(0.3) : AppColors.grey.withOpacity(0.2),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(_resp.isVerySmall ? 12 : 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: isSmallScreen ? 18 : 22,
-                backgroundColor: AppColors.primary.withOpacity(0.1),
-                child: Text(
-                  pupil['name'][0].toUpperCase(),
+              const Text('Student Results',
                   style: TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: isSmallScreen ? 14 : 16,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary)),
+              const SizedBox(height: 16),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      pupil['name'],
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: isSmallScreen ? 14 : 16,
-                        color: AppColors.textPrimary,
+                child: ListView(
+                  controller: scrollController,
+                  children: _pupils
+                      .map((pupil) => ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: _resp.isVerySmall ? 16 : 20,
+                      backgroundColor:
+                      AppColors.primary.withOpacity(0.1),
+                      child: Text(
+                        (pupil['name'] as String)[0].toUpperCase(),
+                        style: const TextStyle(fontSize: 14),
                       ),
                     ),
-                    Text(
-                      pupil['class'],
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 12 : 13,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: pupilFees.isEmpty ? Colors.grey[200] : AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  pupilFees.isEmpty ? 'No Fees' : '₦${totalPupilFees.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 11 : 12,
-                    fontWeight: FontWeight.w600,
-                    color: pupilFees.isEmpty ? Colors.grey[600] : AppColors.primary,
-                  ),
+                    title: Text(pupil['name'] as String,
+                        style: const TextStyle(fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                    subtitle: Text('Class: ${pupil['class']}',
+                        style: const TextStyle(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                    trailing: const Icon(Icons.chevron_right,
+                        size: 18),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _viewPupilResults(pupil);
+                    },
+                  ))
+                      .toList(),
                 ),
               ),
             ],
           ),
-          if (pupilFees.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            ...pupilFees.map((fee) => _buildOtherFeeItem(fee, isSmallScreen)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOtherFeeItem(Map<String, dynamic> fee, bool isSmallScreen) {
-    final isMandatory = fee['isMandatory'] ?? true;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: EdgeInsets.all(isSmallScreen ? 8 : 10),
-      decoration: BoxDecoration(
-        color: isMandatory ? AppColors.primary.withOpacity(0.05) : AppColors.info.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isMandatory ? AppColors.primary.withOpacity(0.2) : AppColors.info.withOpacity(0.2),
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: isMandatory ? AppColors.primary.withOpacity(0.1) : AppColors.info.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(
-              isMandatory ? Icons.check_circle : Icons.info,
-              size: isSmallScreen ? 16 : 18,
-              color: isMandatory ? AppColors.primary : AppColors.info,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  fee['name'] ?? 'Untitled Fee',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: isSmallScreen ? 12 : 13,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                if (fee['description'] != null && fee['description'].toString().isNotEmpty)
-                  Text(
-                    fee['description'],
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 10 : 11,
-                      color: AppColors.textSecondary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isMandatory ? AppColors.primary.withOpacity(0.1) : AppColors.info.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        isMandatory ? 'Mandatory' : 'Optional',
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 9 : 10,
-                          color: isMandatory ? AppColors.primary : AppColors.info,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '₦${(fee['amount'] as double).toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: isSmallScreen ? 12 : 13,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
-  // ==================== DISCOUNT METHODS ====================
+  void _showDiscountsScreen() {
+    if (_pupils.isEmpty) {
+      _showSnack('No pupils found', AppColors.warning);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Student Discounts',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Consumer<DiscountProvider>(
+                  builder: (context, discountProvider, child) {
+                    if (discountProvider.isLoading) {
+                      return const Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.primary),
+                      );
+                    }
+
+                    final hasAnyDiscounts = _pupils.any((pupil) {
+                      final studentId = pupil['id']?.toString() ?? '';
+                      return discountProvider
+                          .getDiscountsForStudent(studentId)
+                          .isNotEmpty;
+                    });
+
+                    if (!hasAnyDiscounts) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.discount_rounded,
+                                size: _resp.isVerySmall ? 40 : 64,
+                                color: AppColors.grey),
+                            const SizedBox(height: 12),
+                            const Text('No discounts available',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: AppColors.textSecondary)),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      controller: scrollController,
+                      itemCount: _pupils.length,
+                      itemBuilder: (context, index) {
+                        final pupil = _pupils[index];
+                        final studentId = pupil['id']?.toString() ?? '';
+                        final pupilDiscounts = discountProvider
+                            .getDiscountsForStudent(studentId);
+                        return _buildStudentDiscountCard(
+                            pupil, pupilDiscounts);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _showStudentDiscounts(Map<String, dynamic> pupil) {
     final studentId = pupil['id']?.toString();
     if (studentId == null || studentId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student ID not available'), backgroundColor: AppColors.warning),
-      );
+      _showSnack('Student ID not available', AppColors.warning);
       return;
     }
 
@@ -1525,202 +2291,15 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       MaterialPageRoute(
         builder: (context) => StudentDiscountScreen(
           studentId: studentId,
-          studentName: pupil['name'],
-          studentClass: pupil['class'],
-          admissionNo: pupil['admissionNo'],
+          studentName: pupil['name'] ?? 'Student',
+          studentClass: pupil['class'] ?? 'N/A',
+          admissionNo: pupil['admissionNo'] ?? '',
         ),
       ),
     );
   }
 
-  // ==================== RESULTS METHODS ====================
-
-  Future<void> _viewPupilResults(Map<String, dynamic> pupil) async {
-    final classroomId = pupil['classroomId']?.toString();
-    if (classroomId == null || classroomId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Classroom not assigned'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
-
-    setState(() {
-      _isLoadingResult = true;
-    });
-
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-
-    if (token == null) {
-      setState(() {
-        _isLoadingResult = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Authentication error'), backgroundColor: AppColors.error),
-      );
-      return;
-    }
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
-      ),
-    );
-
-    final result = await _apiService.getStudentAllSubjectsScoresByTermId(
-      token: token,
-      schoolId: _currentUser.schoolId,
-      classroomId: classroomId,
-      studentId: pupil['id'],
-      sessionKey: _currentUser.sessionKey,
-      termId: _currentUser.termId,
-    );
-
-    Navigator.pop(context);
-
-    setState(() {
-      _isLoadingResult = false;
-    });
-
-    if (result['success'] && result['data'] != null) {
-      _showResultDetailsDialog(pupil, result['data']);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'No results available'),
-          backgroundColor: AppColors.warning,
-        ),
-      );
-    }
-  }
-
-  void _showResultDetailsDialog(Map<String, dynamic> pupil, dynamic resultData) {
-    final studentResult = StudentResult.fromJson(resultData);
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.95,
-          height: MediaQuery.of(context).size.height * 0.9,
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: AppColors.cardGradient,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      pupil['name'],
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${studentResult.className} | ${studentResult.term}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.9),
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columnSpacing: isSmallScreen ? 8 : 12,
-                    headingRowColor: MaterialStateProperty.all(AppColors.primary.withOpacity(0.1)),
-                    columns: const [
-                      DataColumn(label: Text('Subject', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                      DataColumn(label: Text('CA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                      DataColumn(label: Text('Exam', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                      DataColumn(label: Text('Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                      DataColumn(label: Text('Grade', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    ],
-                    rows: studentResult.subjects.map((subject) {
-                      return DataRow(cells: [
-                        DataCell(Text(subject.subjectName, style: TextStyle(fontSize: 11))),
-                        DataCell(Text(subject.caScore.toStringAsFixed(1), style: TextStyle(fontSize: 11))),
-                        DataCell(Text(subject.examScore.toStringAsFixed(1), style: TextStyle(fontSize: 11))),
-                        DataCell(
-                          Text(
-                            subject.totalScore.toStringAsFixed(1),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                              color: subject.totalScore >= 70 ? AppColors.success : AppColors.warning,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: _getGradeColor(subject.grade).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              subject.grade,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 10,
-                                color: _getGradeColor(subject.grade),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ]);
-                    }).toList(),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _getGradeColor(String grade) {
-    switch (grade.toUpperCase()) {
-      case 'A': return AppColors.success;
-      case 'B': return Colors.lightGreen;
-      case 'C': return AppColors.info;
-      case 'D': return AppColors.warning;
-      case 'F': return AppColors.error;
-      default: return AppColors.textSecondary;
-    }
-  }
-
-  // ==================== HMO METHODS ====================
+  // ==================== HMO ====================
 
   Future<void> _fetchHospitalRecords(String token, String studentId) async {
     final recordsResult = await _apiService.getChildHospitalRecords(
@@ -1732,7 +2311,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
 
     if (recordsResult['success'] && mounted) {
       setState(() {
-        _hospitalRecords = (recordsResult['data'] as List?)?.map((record) => ({
+        _hospitalRecords = (recordsResult['data'] as List?)
+            ?.map((record) => {
           'id': record['id'],
           'date': record['visitDate'] ?? record['date'],
           'hospitalName': record['hospitalName'],
@@ -1742,7 +2322,9 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           'visitType': record['visitType'] ?? 'School',
           'cost': (record['cost'] ?? 0).toDouble(),
           'hmoCovered': record['hmoCovered'] ?? true,
-        })).toList() ?? [];
+        })
+            .toList() ??
+            [];
         _isLoadingHMO = false;
       });
     } else {
@@ -1757,20 +2339,14 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
 
   void _showHMOScreen() {
     if (_pupils.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
-      );
+      _showSnack('No pupils found', AppColors.warning);
       return;
     }
 
     if (_hospitalRecords.isEmpty && _pupils.isNotEmpty) {
       final token = Provider.of<AuthProvider>(context, listen: false).token;
-      if (token != null) {
-        _fetchHospitalRecords(token, _pupils[0]['id']);
-      }
+      if (token != null) _fetchHospitalRecords(token, _pupils[0]['id']);
     }
-
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
 
     showModalBottomSheet(
       context: context,
@@ -1787,21 +2363,20 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           return StatefulBuilder(
             builder: (context, bottomSheetSetState) {
               return Container(
-                padding: EdgeInsets.all(isSmallScreen ? 12 : 20),
+                padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Health Records (HMO)',
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 20 : 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primary,
-                      ),
-                    ),
+                    const Text('Health Records (HMO)',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
                     const SizedBox(height: 16),
                     Container(
-                      padding: EdgeInsets.all(isSmallScreen ? 10 : 12),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         gradient: AppColors.cardGradientLight,
                         borderRadius: BorderRadius.circular(12),
@@ -1809,55 +2384,50 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Select Child',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 12 : 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.primary,
-                            ),
-                          ),
+                          const Text('Select Child',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primary)),
                           const SizedBox(height: 8),
                           DropdownButton<int>(
                             value: _selectedPupilForHMO,
                             isExpanded: true,
                             underline: const SizedBox(),
-                            icon: Icon(Icons.arrow_drop_down, color: AppColors.primary),
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 13 : 14,
-                              color: AppColors.textPrimary,
-                            ),
+                            icon: Icon(Icons.arrow_drop_down,
+                                color: AppColors.primary),
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textPrimary),
                             items: _pupils.asMap().entries.map((entry) {
-                              int index = entry.key;
-                              Map<String, dynamic> pupil = entry.value;
                               return DropdownMenuItem<int>(
-                                value: index,
+                                value: entry.key,
                                 child: Text(
-                                  pupil['name'] as String,
+                                  entry.value['name'] as String,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               );
                             }).toList(),
                             onChanged: (value) async {
-                              if (value != null && value != _selectedPupilForHMO) {
+                              if (value != null &&
+                                  value != _selectedPupilForHMO) {
                                 bottomSheetSetState(() {
                                   _selectedPupilForHMO = value;
                                   _isLoadingHMO = true;
                                   _hospitalRecords = [];
                                 });
-
-                                final token = Provider.of<AuthProvider>(context, listen: false).token;
+                                final token = Provider.of<AuthProvider>(
+                                    context,
+                                    listen: false)
+                                    .token;
                                 if (token != null) {
-                                  await _fetchHospitalRecords(token, _pupils[_selectedPupilForHMO]['id']);
+                                  await _fetchHospitalRecords(token,
+                                      _pupils[_selectedPupilForHMO]['id']);
                                   if (mounted) {
                                     bottomSheetSetState(() {
                                       _isLoadingHMO = false;
                                     });
                                   }
-                                } else {
-                                  bottomSheetSetState(() {
-                                    _isLoadingHMO = false;
-                                  });
                                 }
                               }
                             },
@@ -1868,20 +2438,25 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     const SizedBox(height: 16),
                     Expanded(
                       child: _isLoadingHMO
-                          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                          ? const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.primary))
                           : _hospitalRecords.isEmpty
                           ? Center(
                         child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisAlignment:
+                          MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.medical_information, size: isSmallScreen ? 40 : 48, color: AppColors.grey),
+                            Icon(Icons.medical_information,
+                                size: _resp.isVerySmall ? 40 : 48,
+                                color: AppColors.grey),
                             const SizedBox(height: 12),
-                            Text(
+                            const Text(
                               'No hospital records found',
                               style: TextStyle(
-                                fontSize: isSmallScreen ? 13 : 14,
-                                color: AppColors.textSecondary,
-                              ),
+                                  fontSize: 13,
+                                  color:
+                                  AppColors.textSecondary),
                             ),
                           ],
                         ),
@@ -1889,10 +2464,9 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                           : ListView.builder(
                         controller: scrollController,
                         itemCount: _hospitalRecords.length,
-                        itemBuilder: (context, index) {
-                          final record = _hospitalRecords[index];
-                          return _buildHMORecordCard(record, isSmallScreen);
-                        },
+                        itemBuilder: (context, index) =>
+                            _buildHMORecordCard(
+                                _hospitalRecords[index]),
                       ),
                     ),
                   ],
@@ -1905,119 +2479,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  Widget _buildHMORecordCard(Map<String, dynamic> record, bool isSmallScreen) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: EdgeInsets.all(isSmallScreen ? 10 : 12),
-      decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: EdgeInsets.all(isSmallScreen ? 6 : 8),
-                decoration: BoxDecoration(
-                  color: record['visitType'] == 'School'
-                      ? AppColors.info.withOpacity(0.1)
-                      : AppColors.success.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  record['visitType'] == 'School' ? Icons.school : Icons.home,
-                  size: isSmallScreen ? 16 : 20,
-                  color: record['visitType'] == 'School' ? AppColors.info : AppColors.success,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      record['hospitalName'] ?? 'Hospital Visit',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: isSmallScreen ? 13 : 14,
-                      ),
-                    ),
-                    Text(
-                      record['date'] ?? 'Date not specified',
-                      style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: AppColors.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: record['hmoCovered'] == true ? AppColors.success.withOpacity(0.1) : AppColors.error.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  record['hmoCovered'] == true ? 'HMO' : 'Out of Pocket',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 9 : 10,
-                    color: record['hmoCovered'] == true ? AppColors.success : AppColors.error,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (record['diagnosis'] != null && record['diagnosis'].toString().isNotEmpty)
-            Text(
-              'Diagnosis: ${record['diagnosis']}',
-              style: TextStyle(fontSize: isSmallScreen ? 11 : 12),
-            ),
-          if (record['treatment'] != null && record['treatment'].toString().isNotEmpty)
-            Text(
-              'Treatment: ${record['treatment']}',
-              style: TextStyle(fontSize: isSmallScreen ? 11 : 12),
-            ),
-          if (record['doctorName'] != null && record['doctorName'].toString().isNotEmpty)
-            Text(
-              'Doctor: ${record['doctorName']}',
-              style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: AppColors.textSecondary),
-            ),
-          const SizedBox(height: 4),
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 10, vertical: isSmallScreen ? 4 : 6),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Total Cost', style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: AppColors.textSecondary)),
-                Text(
-                  '₦${(record['cost'] as double).toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: isSmallScreen ? 12 : 13,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==================== PHONE CALL METHOD ====================
+  // ==================== PHONE ====================
 
   Future<void> _makePhoneCall(String phoneNumber) async {
-    if (phoneNumber.isEmpty || phoneNumber == 'N/A' || phoneNumber == 'Not available') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone number not available'), backgroundColor: AppColors.warning),
-      );
+    if (phoneNumber.isEmpty ||
+        phoneNumber == 'N/A' ||
+        phoneNumber == 'Not available') {
+      _showSnack('Phone number not available', AppColors.warning);
       return;
     }
 
@@ -2032,17 +2500,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
 
     final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
     try {
-      if (await canLaunchUrl(phoneUri)) {
-        await launchUrl(phoneUri);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phoneNumber'), backgroundColor: AppColors.error),
-      );
+      if (await canLaunchUrl(phoneUri)) await launchUrl(phoneUri);
+    } catch (_) {
+      _showSnack('Could not dial $phoneNumber', AppColors.error);
     }
   }
 
-  // ==================== NAVIGATION METHODS ====================
+  // ==================== NAVIGATION ====================
 
   void _navigateToMessages() {
     Navigator.push(
@@ -2087,17 +2551,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showApplicationDetails(LoanApplication application) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          'Loan Application Details',
-          style: TextStyle(color: AppColors.primary),
-        ),
-        content: Container(
-          width: isSmallScreen ? double.maxFinite : 400,
+        title: const Text('Loan Application Details',
+            style: TextStyle(color: AppColors.primary)),
+        content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2105,13 +2564,18 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               _buildDetailRow('Application ID', application.id),
               _buildDetailRow('Status', application.statusDisplay),
               if (application.requestedAmount != null)
-                _buildDetailRow('Requested Amount', '₦${application.requestedAmount!.toStringAsFixed(2)}'),
+                _buildDetailRow('Requested Amount',
+                    '₦${application.requestedAmount!.toStringAsFixed(2)}'),
               if (application.eligibleAmount != null)
-                _buildDetailRow('Eligible Amount', '₦${application.eligibleAmount!.toStringAsFixed(2)}'),
-              _buildDetailRow('Created', _formatDate(application.createdAt.toString())),
-              _buildDetailRow('Updated', _formatDate(application.updatedAt.toString())),
+                _buildDetailRow('Eligible Amount',
+                    '₦${application.eligibleAmount!.toStringAsFixed(2)}'),
+              _buildDetailRow('Created',
+                  _formatDate(application.createdAt.toString())),
+              _buildDetailRow('Updated',
+                  _formatDate(application.updatedAt.toString())),
               if (application.edubanclStatusMessage != null)
-                _buildDetailRow('Message', application.edubanclStatusMessage!),
+                _buildDetailRow(
+                    'Message', application.edubanclStatusMessage!),
             ],
           ),
         ),
@@ -2148,7 +2612,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   context,
                   MaterialPageRoute(
                     builder: (context) => LoanApplicationScreen(
-                      creditAssessmentId: application.creditAssessmentId ?? '',
+                      creditAssessmentId:
+                      application.creditAssessmentId ?? '',
                       eligibleAmount: application.eligibleAmount ?? 0,
                     ),
                   ),
@@ -2165,45 +2630,12 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _startConversationWithTeacher(Map<String, dynamic> pupil) {
     final teacherId = pupil['teacherId']?.toString() ?? '';
     final teacherName = pupil['teacherName']?.toString() ?? 'Teacher';
 
     if (teacherId.isEmpty || teacherId == 'Not Assigned') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Teacher not assigned'), backgroundColor: AppColors.error),
-      );
+      _showSnack('Teacher not assigned', AppColors.error);
       return;
     }
 
@@ -2221,528 +2653,323 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     ).then((_) => _fetchUnreadMessages());
   }
 
-  void _showFeesScreen() {
-    if (_pupils.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
+  // ==================== HELPERS ====================
 
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) => Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'School Fees Payment',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  children: _pupils.map((pupil) {
-                    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
-                    final hasFee = feeAmount > 0;
-
-                    return ListTile(
-                      dense: true,
-                      leading: CircleAvatar(
-                        radius: isSmallScreen ? 18 : 20,
-                        backgroundColor: hasFee ? AppColors.primary.withOpacity(0.1) : AppColors.grey.withOpacity(0.1),
-                        child: Text(
-                          (pupil['name'] as String)[0].toUpperCase(),
-                          style: TextStyle(
-                            fontSize: isSmallScreen ? 12 : 14,
-                            color: hasFee ? AppColors.primary : AppColors.grey,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        pupil['name'] as String,
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 13 : 14,
-                          color: hasFee ? AppColors.textPrimary : AppColors.grey,
-                        ),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Class: ${pupil['class']}',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 11 : 12,
-                              color: hasFee ? AppColors.textSecondary : AppColors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            hasFee ? '₦${feeAmount.toStringAsFixed(2)}' : 'No Fee',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: isSmallScreen ? 12 : 13,
-                              color: hasFee ? AppColors.primary : AppColors.grey,
-                            ),
-                          ),
-                          if (hasFee)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.success.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text(
-                                'Payable',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: AppColors.success,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _payFeesForPupil(pupil);
-                      },
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+  void _showSnack(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: color),
     );
   }
 
-  void _showResultsScreen() {
-    if (_pupils.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
-
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) => Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Student Results',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  children: _pupils.map((pupil) => ListTile(
-                    dense: true,
-                    leading: CircleAvatar(
-                      radius: isSmallScreen ? 18 : 20,
-                      backgroundColor: AppColors.primary.withOpacity(0.1),
-                      child: Text(
-                        (pupil['name'] as String)[0].toUpperCase(),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                    title: Text(pupil['name'] as String, style: const TextStyle(fontSize: 14)),
-                    subtitle: Text('Class: ${pupil['class']}', style: const TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 18),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _viewPupilResults(pupil);
-                    },
-                  )).toList(),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDiscountsScreen() {
-    if (_pupils.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No pupils found'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
-
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(isSmallScreen ? 12 : 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Student Discounts',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: Icon(Icons.close, size: isSmallScreen ? 20 : 24),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: Consumer<DiscountProvider>(
-                  builder: (context, discountProvider, child) {
-                    if (discountProvider.isLoading) {
-                      return const Center(
-                        child: CircularProgressIndicator(color: AppColors.primary),
-                      );
-                    }
-
-                    final hasAnyDiscounts = _pupils.any((pupil) {
-                      final studentId = pupil['id']?.toString() ?? '';
-                      return discountProvider.getDiscountsForStudent(studentId).isNotEmpty;
-                    });
-
-                    if (!hasAnyDiscounts) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.discount_rounded,
-                              size: isSmallScreen ? 48 : 64,
-                              color: AppColors.grey,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No discounts available',
-                              style: TextStyle(
-                                fontSize: isSmallScreen ? 14 : 16,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'No student discounts have been applied yet',
-                              style: TextStyle(
-                                fontSize: isSmallScreen ? 12 : 13,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    return ListView.builder(
-                      controller: scrollController,
-                      itemCount: _pupils.length,
-                      itemBuilder: (context, index) {
-                        final pupil = _pupils[index];
-                        final studentId = pupil['id']?.toString() ?? '';
-                        final pupilDiscounts = discountProvider.getDiscountsForStudent(studentId);
-
-                        return _buildStudentDiscountCard(
-                          pupil: pupil,
-                          discounts: pupilDiscounts,
-                          isSmallScreen: isSmallScreen,
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStudentDiscountCard({
-    required Map<String, dynamic> pupil,
-    required List<DiscountModel> discounts,
-    required bool isSmallScreen,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(isSmallScreen ? 12 : 16),
-      decoration: BoxDecoration(
-        gradient: AppColors.cardGradientLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: discounts.isNotEmpty ? AppColors.primary.withOpacity(0.3) : AppColors.grey.withOpacity(0.2),
-        ),
-      ),
-      child: Column(
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: isSmallScreen ? 18 : 22,
-                backgroundColor: AppColors.primary.withOpacity(0.1),
-                child: Text(
-                  pupil['name'][0].toUpperCase(),
-                  style: TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: isSmallScreen ? 14 : 16,
-                  ),
-                ),
+          Flexible(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: _resp.smallTextSize,
+                color: AppColors.textSecondary,
               ),
-              const SizedBox(width: 12),
-              Expanded(
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            flex: 3,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: _resp.smallTextSize,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textPrimary,
+              ),
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeeLine(String label, String value, Color valueColor,
+      {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: _resp.smallCaptionSize,
+                color: AppColors.textSecondary,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: _resp.smallCaptionSize,
+                color: valueColor,
+                fontWeight: bold ? FontWeight.bold : FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textPrimary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getGradeColor(String grade) {
+    switch (grade.toUpperCase()) {
+      case 'A':
+        return AppColors.success;
+      case 'B':
+        return Colors.lightGreen;
+      case 'C':
+        return AppColors.info;
+      case 'D':
+        return AppColors.warning;
+      case 'F':
+        return AppColors.error;
+      default:
+        return AppColors.textSecondary;
+    }
+  }
+
+  // ==================== RESULTS ====================
+
+  Future<void> _viewPupilResults(Map<String, dynamic> pupil) async {
+    final classroomId = pupil['classroomId']?.toString();
+    if (classroomId == null || classroomId.isEmpty) {
+      _showSnack('Classroom not assigned', AppColors.warning);
+      return;
+    }
+
+    setState(() => _isLoadingResult = true);
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+
+    if (token == null) {
+      setState(() => _isLoadingResult = false);
+      _showSnack('Authentication error', AppColors.error);
+      return;
+    }
+
+    final result = await _apiService.getStudentAllSubjectsScoresByTermId(
+      token: token,
+      schoolId: _currentUser.schoolId,
+      classroomId: classroomId,
+      studentId: pupil['id'],
+      sessionKey: _currentUser.sessionKey,
+      termId: _currentUser.termId,
+    );
+
+    setState(() => _isLoadingResult = false);
+
+    if (result['success'] && result['data'] != null) {
+      _showResultDetailsDialog(pupil, result['data']);
+    } else {
+      _showSnack(result['message'] ?? 'No results available',
+          AppColors.warning);
+    }
+  }
+
+  void _showResultDetailsDialog(
+      Map<String, dynamic> pupil, dynamic resultData) {
+    final studentResult = StudentResult.fromJson(resultData);
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.95,
+          height: MediaQuery.of(context).size.height * 0.9,
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: AppColors.cardGradient,
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       pupil['name'],
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: isSmallScreen ? 14 : 16,
-                        color: AppColors.textPrimary,
-                      ),
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
+                    const SizedBox(height: 4),
                     Text(
-                      pupil['class'],
+                      '${studentResult.className} | ${studentResult.term}',
                       style: TextStyle(
-                        fontSize: isSmallScreen ? 12 : 13,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    Text(
-                      'Admission: ${pupil['admissionNo']}',
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 11 : 12,
-                        color: AppColors.textSecondary,
-                      ),
+                          fontSize: 12,
+                          color: Colors.white.withOpacity(0.9)),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: discounts.isEmpty ? Colors.grey[200] : AppColors.success.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  discounts.isEmpty ? 'No Discount' : '${discounts.length} Discount${discounts.length > 1 ? 's' : ''}',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 11 : 12,
-                    fontWeight: FontWeight.w600,
-                    color: discounts.isEmpty ? Colors.grey[600] : AppColors.success,
+              const SizedBox(height: 12),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columnSpacing: 10,
+                    headingRowColor: MaterialStateProperty.all(
+                        AppColors.primary.withOpacity(0.1)),
+                    columns: const [
+                      DataColumn(
+                          label: Text('Subject',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12))),
+                      DataColumn(
+                          label: Text('CA',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12))),
+                      DataColumn(
+                          label: Text('Exam',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12))),
+                      DataColumn(
+                          label: Text('Total',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12))),
+                      DataColumn(
+                          label: Text('Grade',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12))),
+                    ],
+                    rows: studentResult.subjects.map((subject) {
+                      return DataRow(cells: [
+                        DataCell(Text(subject.subjectName,
+                            style: const TextStyle(fontSize: 11))),
+                        DataCell(Text(
+                            subject.caScore.toStringAsFixed(1),
+                            style: const TextStyle(fontSize: 11))),
+                        DataCell(Text(
+                            subject.examScore.toStringAsFixed(1),
+                            style: const TextStyle(fontSize: 11))),
+                        DataCell(Text(
+                          subject.totalScore.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: subject.totalScore >= 70
+                                ? AppColors.success
+                                : AppColors.warning,
+                          ),
+                        )),
+                        DataCell(Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getGradeColor(subject.grade)
+                                .withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            subject.grade,
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 10,
+                                color: _getGradeColor(subject.grade)),
+                          ),
+                        )),
+                      ]);
+                    }).toList(),
                   ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Close'),
                 ),
               ),
             ],
           ),
-          if (discounts.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            ...discounts.map((discount) => _buildDiscountItem(discount, isSmallScreen)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDiscountItem(DiscountModel discount, bool isSmallScreen) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: EdgeInsets.all(isSmallScreen ? 8 : 10),
-      decoration: BoxDecoration(
-        color: discount.isValid ? AppColors.primary.withOpacity(0.05) : AppColors.grey.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: discount.isValid ? AppColors.primary.withOpacity(0.2) : AppColors.grey.withOpacity(0.2),
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: discount.isValid ? AppColors.primary.withOpacity(0.1) : AppColors.grey.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(
-              discount.isValid ? Icons.check_circle : Icons.cancel,
-              size: isSmallScreen ? 16 : 18,
-              color: discount.isValid ? AppColors.success : AppColors.grey,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  discount.discountType,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: isSmallScreen ? 12 : 13,
-                    color: discount.isValid ? AppColors.textPrimary : AppColors.textSecondary,
-                  ),
-                ),
-                if (discount.description.isNotEmpty)
-                  Text(
-                    discount.description,
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 10 : 11,
-                      color: AppColors.textSecondary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        discount.formattedAmount,
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 10 : 11,
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: discount.statusColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        discount.statusText,
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 9 : 10,
-                          color: discount.statusColor,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
-  void _showTransactionHistory() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Transaction history coming soon'),
-        backgroundColor: AppColors.warning,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout', style: TextStyle(color: AppColors.error)),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
-              await authProvider.logout();
-              if (mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==================== CORE BUILD METHODS ====================
+  // ==================== BUILD ====================
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
     _resp = ResponsiveInfo(MediaQuery.of(context).size.width);
 
     return Scaffold(
@@ -2750,7 +2977,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         color: AppColors.background,
         child: SafeArea(
           child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+              ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary))
               : _errorMessage != null
               ? _buildErrorView()
               : RefreshIndicator(
@@ -2762,35 +2990,40 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           ),
         ),
       ),
-      bottomNavigationBar: _isLoading || _errorMessage != null ? null : _buildBottomNavigationBar(),
+      bottomNavigationBar: _isLoading || _errorMessage != null
+          ? null
+          : _buildBottomNavigationBar(),
     );
   }
 
   Widget _buildErrorView() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 64, color: AppColors.error),
-          const SizedBox(height: 16),
-          Text(
-            _errorMessage!,
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: _resp.isMobile ? 14 : 16,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: AppColors.error),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: _resp.isVerySmall ? 13 : 15,
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _fetchDashboardData,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.white,
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _fetchDashboardData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.white,
+              ),
+              child: const Text('Retry'),
             ),
-            child: const Text('Retry'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2809,50 +3042,40 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         backgroundColor: Colors.transparent,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.grey,
+        selectedFontSize: _resp.isVerySmall ? 9 : 11,
+        unselectedFontSize: _resp.isVerySmall ? 9 : 11,
         currentIndex: _selectedIndex,
         elevation: 0,
         onTap: (index) => setState(() => _selectedIndex = index),
         items: [
           const BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_rounded),
-            label: 'Home',
-          ),
+              icon: Icon(Icons.dashboard_rounded), label: 'Home'),
           const BottomNavigationBarItem(
-            icon: Icon(Icons.school_rounded),
-            label: 'Pupils',
-          ),
+              icon: Icon(Icons.school_rounded), label: 'Pupils'),
           const BottomNavigationBarItem(
-            icon: Icon(Icons.account_balance_wallet_rounded),
-            label: 'Wallet',
-          ),
+              icon: Icon(Icons.account_balance_wallet_rounded),
+              label: 'Wallet'),
           const BottomNavigationBarItem(
-            icon: Icon(Icons.person_rounded),
-            label: 'Profile',
-          ),
+              icon: Icon(Icons.person_rounded), label: 'Profile'),
           BottomNavigationBarItem(
             icon: Stack(
+              clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.message_rounded),
                 if (_unreadMessageCount > 0)
                   Positioned(
-                    right: 0,
-                    top: 0,
+                    right: -4,
+                    top: -4,
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
+                          color: Colors.red, shape: BoxShape.circle),
                       constraints: const BoxConstraints(
-                        minWidth: 12,
-                        minHeight: 12,
-                      ),
+                          minWidth: 14, minHeight: 14),
                       child: Text(
                         '$_unreadMessageCount',
                         style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                        ),
+                            color: Colors.white, fontSize: 8),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -2862,15 +3085,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             label: 'Messages',
           ),
           const BottomNavigationBarItem(
-            icon: Icon(Icons.more_horiz_rounded),
-            label: 'More',
-          ),
+              icon: Icon(Icons.more_horiz_rounded), label: 'More'),
         ],
       ),
     );
   }
 
-  // ==================== HOME SCREEN ====================
+  // ==================== HOME ====================
 
   Widget _buildHomeScreen() {
     return SingleChildScrollView(
@@ -2881,6 +3102,10 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         children: [
           _buildHeader(),
           const SizedBox(height: 12),
+          if (_totalOutstandingDue > 0) ...[
+            _buildOutstandingBanner(),
+            const SizedBox(height: 12),
+          ],
           _buildCarousel(),
           const SizedBox(height: 12),
           _buildStatsGrid(),
@@ -2895,11 +3120,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           const SizedBox(height: 12),
           _buildLoanApplicationsSection(),
           const SizedBox(height: 12),
-          _buildSectionTitle('Assignments', _assignments.isNotEmpty ? 'View All' : null),
+          _buildSectionTitle(
+              'Assignments', _assignments.isNotEmpty ? 'View All' : null),
           const SizedBox(height: 8),
           _buildAssignmentsPreview(),
           const SizedBox(height: 12),
-          _buildSectionTitle('News & Events', _news.isNotEmpty ? 'View All' : null),
+          _buildSectionTitle(
+              'News & Events', _news.isNotEmpty ? 'View All' : null),
           const SizedBox(height: 8),
           _buildNewsAndEvents(),
           const SizedBox(height: 16),
@@ -2908,138 +3135,56 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  Widget _buildLoanApplicationsSection() {
-    final activeApps = _loanProvider.activeApplications;
-    final hasActiveApps = activeApps.isNotEmpty;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle('Loan Applications', hasActiveApps ? 'View All' : null),
-        const SizedBox(height: 8),
-        if (_loanProvider.isLoading)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
-            ),
-          )
-        else if (activeApps.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.credit_card_off, size: 40, color: AppColors.grey),
-                const SizedBox(height: 8),
-                Text(
-                  'No active loan applications',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: _resp.bodyTextSize,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: _navigateToLoanRequest,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Apply for Loan'),
-                ),
-              ],
-            ),
-          )
-        else
-          Container(
-            decoration: BoxDecoration(
-              gradient: AppColors.cardGradientLight,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: activeApps.length > 2 ? 2 : activeApps.length,
-              separatorBuilder: (context, index) =>
-                  Divider(height: 0.5, color: AppColors.greyLight),
-              itemBuilder: (context, index) {
-                final application = activeApps[index];
-                return _buildLoanApplicationTile(application);
-              },
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildLoanApplicationTile(LoanApplication application) {
-    return ListTile(
-      contentPadding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: _resp.isMobile ? 6 : 8,
-      ),
-      leading: Container(
-        padding: const EdgeInsets.all(8),
+  Widget _buildOutstandingBanner() {
+    return GestureDetector(
+      onTap: _showFeesScreen,
+      child: Container(
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: application.statusColor.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          application.statusIcon,
-          color: application.statusColor,
-          size: _resp.smallIconSize,
-        ),
-      ),
-      title: Text(
-        'Application #${application.id.length > 8 ? application.id.substring(0, 8) : application.id}',
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: _resp.smallTextSize,
-          color: AppColors.textPrimary,
-        ),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Status: ${application.statusDisplay}',
-            style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: application.statusColor,
-              fontWeight: FontWeight.w500,
+          gradient: AppColors.cardGradient,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.3),
+              blurRadius: 10,
             ),
-          ),
-          if (application.requestedAmount != null)
-            Text(
-              'Amount: ₦${application.requestedAmount!.toStringAsFixed(2)}',
-              style: TextStyle(
-                fontSize: _resp.smallCaptionSize,
-                color: AppColors.textSecondary,
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: AppColors.white, size: _resp.iconSize),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Total Outstanding',
+                    style: TextStyle(
+                      fontSize: _resp.smallCaptionSize,
+                      color: AppColors.white.withOpacity(0.9),
+                    ),
+                  ),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '₦${_totalOutstandingDue.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: _resp.isVerySmall ? 20 : 24,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          Text(
-            'Updated: ${_formatDate(application.updatedAt.toString())}',
-            style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
+            Icon(Icons.chevron_right,
+                color: AppColors.white, size: _resp.iconSize),
+          ],
+        ),
       ),
-      trailing: Icon(
-        Icons.chevron_right,
-        color: AppColors.primary,
-        size: _resp.smallIconSize,
-      ),
-      onTap: () => _navigateToLoanApplication(application),
     );
   }
 
@@ -3060,23 +3205,17 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     }
   }
 
-  // ==================== HEADER ====================
-
   Widget _buildHeader() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Welcome back,',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: _resp.smallTextSize,
-                ),
-              ),
+              Text('Welcome back,',
+                  style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: _resp.smallTextSize)),
               const SizedBox(height: 2),
               Text(
                 _currentUser.name.isNotEmpty ? _currentUser.name : 'Guardian',
@@ -3086,19 +3225,22 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   fontWeight: FontWeight.bold,
                 ),
                 overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
               Text(
                 _currentUser.schoolName,
                 style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: _resp.captionSize,
-                ),
+                    color: AppColors.textSecondary,
+                    fontSize: _resp.captionSize),
                 overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ],
           ),
         ),
+        const SizedBox(width: 8),
         Stack(
+          clipBehavior: Clip.none,
           children: [
             GestureDetector(
               onTap: () => setState(() => _selectedIndex = 4),
@@ -3110,41 +3252,32 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.primary.withOpacity(0.3),
-                      blurRadius: 10,
-                    ),
+                        color: AppColors.primary.withOpacity(0.3),
+                        blurRadius: 10),
                   ],
                 ),
                 child: Center(
-                  child: Icon(
-                    Icons.message,
-                    size: _resp.iconSize,
-                    color: AppColors.white,
-                  ),
+                  child: Icon(Icons.message,
+                      size: _resp.iconSize, color: AppColors.white),
                 ),
               ),
             ),
             if (_unreadMessageCount > 0)
               Positioned(
-                right: 0,
-                top: 0,
+                right: -2,
+                top: -2,
                 child: Container(
                   padding: const EdgeInsets.all(2),
                   decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  constraints: const BoxConstraints(
-                    minWidth: 16,
-                    minHeight: 16,
-                  ),
+                      color: Colors.red, shape: BoxShape.circle),
+                  constraints:
+                  const BoxConstraints(minWidth: 16, minHeight: 16),
                   child: Text(
                     '$_unreadMessageCount',
                     style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -3155,43 +3288,29 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== CAROUSEL ====================
-
   Widget _buildCarousel() {
-    final List<Widget> carouselItems = [
-      _buildWalletCard(),
-      _buildLoanCard(),
-    ];
-
+    final items = [_buildWalletCard(), _buildLoanCard()];
     return Column(
       children: [
         SizedBox(
-          height: _resp.isMobile ? 230 : 250,
+          height: _resp.isVerySmall ? 210 : _resp.isMobile ? 230 : 250,
           child: PageView.builder(
             controller: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentCarouselIndex = index;
-              });
-            },
-            itemCount: carouselItems.length,
-            itemBuilder: (context, index) {
-              return carouselItems[index];
-            },
+            onPageChanged: (i) => setState(() => _currentCarouselIndex = i),
+            itemCount: items.length,
+            itemBuilder: (context, index) => items[index],
           ),
         ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(carouselItems.length, (index) {
+          children: List.generate(items.length, (index) {
             return GestureDetector(
-              onTap: () {
-                _pageController.animateToPage(
-                  index,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-              },
+              onTap: () => _pageController.animateToPage(
+                index,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              ),
               child: Container(
                 width: 8,
                 height: 8,
@@ -3213,60 +3332,74 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   Widget _buildWalletCard() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      padding: EdgeInsets.all(_resp.isMobile ? 16 : 20),
+      padding:
+      EdgeInsets.all(_resp.isVerySmall ? 12 : _resp.isMobile ? 16 : 20),
       decoration: BoxDecoration(
         gradient: AppColors.cardGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 10,
-          ),
+              color: AppColors.primary.withOpacity(0.3), blurRadius: 10),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Wallet Balance',
-                style: TextStyle(
-                  fontSize: _resp.isMobile ? 16 : 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.white,
-                ),
+              Expanded(
+                child: Text('Wallet Balance',
+                    style: TextStyle(
+                      fontSize: _resp.isVerySmall
+                          ? 14
+                          : _resp.isMobile
+                          ? 16
+                          : 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.white,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
               ),
+              const SizedBox(width: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: AppColors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Text(
-                  'Active',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: AppColors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                child: const Text('Active',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.white,
+                        fontWeight: FontWeight.bold)),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Center(
-            child: Text(
-              '₦${_walletBalance.toStringAsFixed(2)}',
-              style: TextStyle(
-                fontSize: _resp.isMobile ? 28 : _resp.isTablet ? 34 : 38,
-                fontWeight: FontWeight.bold,
-                color: AppColors.white,
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '₦${_walletBalance.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: _resp.isVerySmall
+                        ? 22
+                        : _resp.isMobile
+                        ? 28
+                        : _resp.isTablet
+                        ? 34
+                        : 38,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.white,
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -3276,19 +3409,21 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     backgroundColor: AppColors.white,
                     foregroundColor: AppColors.primary,
                     padding: EdgeInsets.symmetric(
-                      vertical: _resp.isMobile ? 8 : 10,
-                    ),
+                        vertical: _resp.isMobile ? 8 : 10, horizontal: 4),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: Text(
-                    _resp.isMobile ? 'Fund' : 'Fund Wallet',
-                    style: TextStyle(fontSize: _resp.isMobile ? 12 : 14),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _resp.isVerySmall ? 'Fund' : 'Fund Wallet',
+                      style: TextStyle(fontSize: _resp.isMobile ? 11 : 13),
+                      maxLines: 1,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: OutlinedButton(
                   onPressed: _navigateToLoanRequest,
@@ -3296,15 +3431,17 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     foregroundColor: AppColors.white,
                     side: const BorderSide(color: AppColors.white),
                     padding: EdgeInsets.symmetric(
-                      vertical: _resp.isMobile ? 8 : 10,
-                    ),
+                        vertical: _resp.isMobile ? 8 : 10, horizontal: 4),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: Text(
-                    _resp.isMobile ? 'Loan' : 'Get Loan',
-                    style: TextStyle(fontSize: _resp.isMobile ? 12 : 14),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _resp.isVerySmall ? 'Loan' : 'Get Loan',
+                      style: TextStyle(fontSize: _resp.isMobile ? 11 : 13),
+                      maxLines: 1,
+                    ),
                   ),
                 ),
               ),
@@ -3319,46 +3456,51 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     if (_isLoadingLoan) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: EdgeInsets.all(_resp.isMobile ? 16 : 20),
+        padding: EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: AppColors.cardGradient,
           borderRadius: BorderRadius.circular(20),
         ),
         child: const Center(
-          child: CircularProgressIndicator(color: AppColors.white),
-        ),
+            child: CircularProgressIndicator(color: AppColors.white)),
       );
     }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      padding: EdgeInsets.all(_resp.isMobile ? 16 : 20),
+      padding:
+      EdgeInsets.all(_resp.isVerySmall ? 12 : _resp.isMobile ? 16 : 20),
       decoration: BoxDecoration(
         gradient: AppColors.cardGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 10,
-          ),
+              color: AppColors.primary.withOpacity(0.3), blurRadius: 10),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Loan Summary',
-                style: TextStyle(
-                  fontSize: _resp.isMobile ? 16 : 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.white,
-                ),
+              Expanded(
+                child: Text('Loan Summary',
+                    style: TextStyle(
+                      fontSize: _resp.isVerySmall
+                          ? 14
+                          : _resp.isMobile
+                          ? 16
+                          : 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.white,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
               ),
+              const SizedBox(width: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: _activeLoans > 0
                       ? AppColors.warning.withOpacity(0.2)
@@ -3369,7 +3511,9 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   _activeLoans > 0 ? 'Active' : 'No Active',
                   style: TextStyle(
                     fontSize: 10,
-                    color: _activeLoans > 0 ? AppColors.warning : AppColors.success,
+                    color: _activeLoans > 0
+                        ? AppColors.warning
+                        : AppColors.success,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -3377,17 +3521,28 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             ],
           ),
           const SizedBox(height: 12),
-          Center(
-            child: Text(
-              '₦${_loanBalance.toStringAsFixed(2)}',
-              style: TextStyle(
-                fontSize: _resp.isMobile ? 28 : _resp.isTablet ? 34 : 38,
-                fontWeight: FontWeight.bold,
-                color: AppColors.white,
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '₦${_loanBalance.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: _resp.isVerySmall
+                        ? 22
+                        : _resp.isMobile
+                        ? 28
+                        : _resp.isTablet
+                        ? 34
+                        : 38,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.white,
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -3397,35 +3552,38 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     foregroundColor: AppColors.white,
                     side: const BorderSide(color: AppColors.white),
                     padding: EdgeInsets.symmetric(
-                      vertical: _resp.isMobile ? 8 : 10,
-                    ),
+                        vertical: _resp.isMobile ? 8 : 10, horizontal: 4),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: Text(
-                    'Details',
-                    style: TextStyle(fontSize: _resp.isMobile ? 12 : 14),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Details',
+                        style: TextStyle(
+                            fontSize: _resp.isMobile ? 11 : 13),
+                        maxLines: 1),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: _loanBalance > 0 ? _showWithdrawDialog : null,
+                  onPressed:
+                  _loanBalance > 0 ? _showWithdrawDialog : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.white,
                     foregroundColor: AppColors.primary,
                     padding: EdgeInsets.symmetric(
-                      vertical: _resp.isMobile ? 8 : 10,
-                    ),
+                        vertical: _resp.isMobile ? 8 : 10, horizontal: 4),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: Text(
-                    'Repay',
-                    style: TextStyle(fontSize: _resp.isMobile ? 12 : 14),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Repay',
+                        style: TextStyle(
+                            fontSize: _resp.isMobile ? 11 : 13),
+                        maxLines: 1),
                   ),
                 ),
               ),
@@ -3436,10 +3594,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== STATS GRID ====================
+  // ==================== STATS ====================
 
   Widget _buildStatsGrid() {
-    final crossAxisCount = _resp.isMobile ? 2 : (_resp.isTablet ? 3 : 4);
+    final crossAxisCount = _resp.isVerySmall
+        ? 2
+        : (_resp.isMobile ? 2 : (_resp.isTablet ? 3 : 4));
+    final ratio = _resp.isVerySmall ? 1.6 : 1.4;
 
     return GridView.count(
       shrinkWrap: true,
@@ -3447,32 +3608,32 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       crossAxisCount: crossAxisCount,
       mainAxisSpacing: _resp.gridSpacing,
       crossAxisSpacing: _resp.gridSpacing,
-      childAspectRatio: 1.4,
+      childAspectRatio: ratio,
       children: [
-        _buildStatCard('Pupils', '${_pupils.length}', Icons.people, AppColors.primary),
-        _buildStatCard('Assignments', '${_assignments.length}', Icons.assignment, AppColors.info),
+        _buildStatCard('Pupils', '${_pupils.length}', Icons.people,
+            AppColors.primary),
         _buildStatCard(
-          'Loans',
-          _activeLoans > 0 ? '₦${_loanBalance.toStringAsFixed(0)}' : '₦0',
-          Icons.credit_card,
-          AppColors.warning,
-        ),
-        _buildStatCard('HMO', 'Active', Icons.health_and_safety, AppColors.success),
+            'Outstanding',
+            '₦${_totalOutstandingDue.toStringAsFixed(0)}',
+            Icons.receipt_long,
+            AppColors.warning),
+        _buildStatCard('Assignments', '${_assignments.length}',
+            Icons.assignment, AppColors.info),
+        _buildStatCard(
+            'HMO', 'Active', Icons.health_and_safety, AppColors.success),
       ],
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+      String title, String value, IconData icon, Color color) {
     return Container(
-      padding: EdgeInsets.all(_resp.isMobile ? 8 : 10),
+      padding: EdgeInsets.all(_resp.isVerySmall ? 6 : 10),
       decoration: BoxDecoration(
         gradient: AppColors.cardGradientLight,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 3,
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3),
         ],
       ),
       child: Column(
@@ -3480,43 +3641,53 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         children: [
           Icon(icon, size: _resp.iconSize, color: color),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: _resp.valueSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: _resp.valueSize,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+              ),
             ),
-            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 2),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: AppColors.textSecondary,
+          Flexible(
+            child: Text(
+              title,
+              style: TextStyle(
+                  fontSize: _resp.smallCaptionSize,
+                  color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  // ==================== SECTION TITLE ====================
-
   Widget _buildSectionTitle(String title, String? action) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: _resp.sectionTitleSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: _resp.sectionTitleSize,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
           if (action != null)
@@ -3532,12 +3703,16 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                   _showAllLoanApplications();
                 }
               },
-              child: Text(
-                action,
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontSize: _resp.smallTextSize,
-                  fontWeight: FontWeight.w500,
+              child: Padding(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  action,
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: _resp.smallTextSize,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ),
@@ -3557,38 +3732,32 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Center(
-          child: Text(
-            'No wards found',
-            style: TextStyle(color: AppColors.textSecondary),
-          ),
+          child: Text('No wards found',
+              style: TextStyle(color: AppColors.textSecondary)),
         ),
       );
     }
 
     final displayList = _isSearchingPupils ? _filteredPupils : _pupils;
-    final itemCount = _isSearchingPupils ? displayList.length : (displayList.length > 3 ? 3 : displayList.length);
+    final itemCount = _isSearchingPupils
+        ? displayList.length
+        : (displayList.length > 3 ? 3 : displayList.length);
 
     return Column(
       children: [
         Container(
           padding: EdgeInsets.symmetric(
-            horizontal: _resp.padding,
-            vertical: _resp.isMobile ? 6 : 8,
-          ),
+              horizontal: _resp.padding, vertical: _resp.isMobile ? 6 : 8),
           child: TextField(
             controller: _searchController,
             onChanged: _filterPupils,
             decoration: InputDecoration(
               hintText: 'Search by name, class, or teacher...',
               hintStyle: TextStyle(
-                fontSize: _resp.smallTextSize,
-                color: AppColors.textSecondary,
-              ),
-              prefixIcon: Icon(
-                Icons.search,
-                color: AppColors.primary,
-                size: _resp.iconSize,
-              ),
+                  fontSize: _resp.smallTextSize,
+                  color: AppColors.textSecondary),
+              prefixIcon: Icon(Icons.search,
+                  color: AppColors.primary, size: _resp.iconSize),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                 icon: Icon(Icons.clear, size: _resp.smallIconSize),
@@ -3605,26 +3774,21 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               filled: true,
               fillColor: AppColors.greyLight,
               contentPadding: EdgeInsets.symmetric(
-                vertical: _resp.isMobile ? 8 : 10,
-                horizontal: 12,
-              ),
+                  vertical: _resp.isMobile ? 8 : 10, horizontal: 12),
             ),
           ),
         ),
         if (_isSearchingPupils)
           Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: _resp.padding,
-              vertical: 6,
-            ),
+            padding:
+            EdgeInsets.symmetric(horizontal: _resp.padding, vertical: 6),
             color: AppColors.primary.withOpacity(0.05),
             child: Text(
               'Found ${_filteredPupils.length} child${_filteredPupils.length != 1 ? 'ren' : ''}',
               style: TextStyle(
-                fontSize: _resp.smallTextSize,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
+                  fontSize: _resp.smallTextSize,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500),
             ),
           ),
         Container(
@@ -3638,10 +3802,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             itemCount: itemCount,
             separatorBuilder: (context, index) =>
                 Divider(height: 0.5, color: AppColors.greyLight),
-            itemBuilder: (context, index) {
-              final pupil = displayList[index];
-              return _buildPupilTile(pupil);
-            },
+            itemBuilder: (context, index) =>
+                _buildPupilTile(displayList[index]),
           ),
         ),
       ],
@@ -3653,14 +3815,34 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         pupil['teacherPhone'] != 'Not available' &&
         pupil['teacherPhone'] != 'N/A' &&
         pupil['teacherPhone'].toString().isNotEmpty;
-    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
-    final hasFee = feeAmount > 0;
+
+    final double balance = (pupil['balance'] as num?)?.toDouble() ?? 0.0;
+    final double totalFees = (pupil['totalFees'] as num?)?.toDouble() ?? 0.0;
+    final bool hasFee = totalFees > 0;
+    final bool isCleared = hasFee && balance <= 0;
+
+    Color balanceColor;
+    IconData balanceIcon;
+    String balanceText;
+
+    if (!hasFee) {
+      balanceColor = AppColors.grey;
+      balanceIcon = Icons.info_outline;
+      balanceText = 'No outstanding fees';
+    } else if (isCleared) {
+      balanceColor = AppColors.success;
+      balanceIcon = Icons.check_circle;
+      balanceText = 'Fully cleared';
+    } else {
+      balanceColor = AppColors.warning;
+      balanceIcon = Icons.warning_amber_rounded;
+      balanceText = 'Owes ₦${balance.toStringAsFixed(2)}';
+    }
 
     return ListTile(
       contentPadding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: _resp.isMobile ? 6 : 8,
-      ),
+          horizontal: _resp.isVerySmall ? 8 : 12,
+          vertical: _resp.isMobile ? 6 : 8),
       leading: CircleAvatar(
         radius: _resp.isMobile ? 18 : 22,
         backgroundColor: AppColors.primary.withOpacity(0.1),
@@ -3680,6 +3862,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           fontSize: _resp.bodyTextSize,
           color: AppColors.textPrimary,
         ),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
       ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3687,55 +3871,58 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           Text(
             pupil['class'] as String,
             style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: AppColors.textSecondary,
-            ),
+                fontSize: _resp.smallCaptionSize,
+                color: AppColors.textSecondary),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
-          Text(
-            'Fee: ₦${feeAmount.toStringAsFixed(2)}',
-            style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: hasFee ? AppColors.primary : AppColors.grey,
-              fontWeight: hasFee ? FontWeight.w500 : FontWeight.normal,
-            ),
-          ),
-          Text(
-            'Teacher: ${pupil['teacherName']}',
-            style: TextStyle(
-              fontSize: _resp.smallCaptionSize,
-              color: AppColors.textSecondary,
-            ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Icon(balanceIcon, size: 12, color: balanceColor),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  balanceText,
+                  style: TextStyle(
+                    fontSize: _resp.smallCaptionSize,
+                    color: balanceColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
           ),
         ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasPhone)
+          if (hasPhone && !_resp.isVerySmall)
             IconButton(
-              icon: Icon(
-                Icons.phone,
-                color: AppColors.success,
-                size: _resp.smallIconSize,
-              ),
+              padding: EdgeInsets.zero,
+              constraints:
+              const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: Icon(Icons.phone,
+                  color: AppColors.success, size: _resp.smallIconSize),
               onPressed: () => _makePhoneCall(pupil['teacherPhone']),
               tooltip: 'Call Teacher',
             ),
           IconButton(
-            icon: Icon(
-              Icons.message,
-              color: AppColors.primary,
-              size: _resp.smallIconSize,
-            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(Icons.message,
+                color: AppColors.primary, size: _resp.smallIconSize),
             onPressed: () => _startConversationWithTeacher(pupil),
-            tooltip: 'Message Teacher',
+            tooltip: 'Message',
           ),
           IconButton(
-            icon: Icon(
-              Icons.chevron_right,
-              color: AppColors.primary,
-              size: _resp.smallIconSize,
-            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(Icons.chevron_right,
+                color: AppColors.primary, size: _resp.smallIconSize),
             onPressed: () => _showPupilDetails(pupil),
             tooltip: 'Details',
           ),
@@ -3747,7 +3934,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   // ==================== QUICK ACTIONS ====================
 
   Widget _buildQuickActions() {
-    final columns = _resp.isMobile ? 4 : (_resp.isTablet ? 5 : 6);
+    // Fixed 4 items per row across all screen sizes
+    const int columns = 4;
 
     return GridView.count(
       shrinkWrap: true,
@@ -3760,11 +3948,16 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         _buildActionTile(Icons.payments, 'Fees', _showFeesScreen),
         _buildActionTile(Icons.grade, 'Results', _showResultsScreen),
         _buildActionTile(Icons.health_and_safety, 'HMO', _showHMOScreen),
-        _buildActionTile(Icons.discount_rounded, 'Discounts', _showDiscountsScreen),
-        _buildActionTile(Icons.receipt_long, 'Other Fees', _showOtherFeesScreen),
-        _buildActionTile(Icons.credit_card, 'Request Loan', _navigateToLoanRequest),
+        _buildActionTile(
+            Icons.discount_rounded, 'Discounts', _showDiscountsScreen),
+        _buildActionTile(
+            Icons.credit_card, 'Request Loan', _navigateToLoanRequest),
         _buildActionTile(Icons.message, 'Messages', _navigateToMessages),
-        _buildActionTile(Icons.history, 'History', _showTransactionHistory),
+        _buildActionTile(
+            Icons.history, 'Payment History', _showTransactionHistory),
+        _buildActionTile(Icons.school, 'Pupils', () {
+          setState(() => _selectedIndex = 1);
+        }),
       ],
     );
   }
@@ -3774,7 +3967,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        padding: EdgeInsets.symmetric(vertical: _resp.isMobile ? 8 : 10),
+        padding: EdgeInsets.symmetric(
+            horizontal: 2, vertical: _resp.isMobile ? 8 : 10),
         decoration: BoxDecoration(
           gradient: AppColors.cardGradientLight,
           borderRadius: BorderRadius.circular(10),
@@ -3785,14 +3979,23 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           children: [
             Icon(icon, size: _resp.iconSize, color: AppColors.primary),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: _resp.actionLabelSize,
-                fontWeight: FontWeight.w500,
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: _resp.actionLabelSize,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                  ),
+                ),
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -3800,7 +4003,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== ASSIGNMENTS PREVIEW ====================
+  // ==================== ASSIGNMENTS ====================
 
   Widget _buildAssignmentsPreview() {
     if (_isLoadingAssignments) {
@@ -3811,8 +4014,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
+            child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
@@ -3825,22 +4027,19 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         ),
         child: Column(
           children: [
-            Icon(Icons.assignment_turned_in, size: 40, color: AppColors.grey),
+            Icon(Icons.assignment_turned_in,
+                size: 40, color: AppColors.grey),
             const SizedBox(height: 8),
-            Text(
-              'No assignments yet',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: _resp.bodyTextSize,
-              ),
-            ),
+            Text('No assignments yet',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: _resp.bodyTextSize)),
           ],
         ),
       );
     }
 
     final displayCount = _assignments.length > 2 ? 2 : _assignments.length;
-
     return Container(
       decoration: BoxDecoration(
         gradient: AppColors.cardGradientLight,
@@ -3852,10 +4051,8 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         itemCount: displayCount,
         separatorBuilder: (context, index) =>
             Divider(height: 0.5, color: AppColors.greyLight),
-        itemBuilder: (context, index) {
-          final assignment = _assignments[index];
-          return _buildAssignmentItem(assignment);
-        },
+        itemBuilder: (context, index) =>
+            _buildAssignmentItem(_assignments[index]),
       ),
     );
   }
@@ -3867,39 +4064,35 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: _resp.isMobile ? 6 : 8,
-      ),
+          horizontal: _resp.isVerySmall ? 8 : 12, vertical: 6),
       leading: Container(
-        padding: EdgeInsets.all(_resp.isMobile ? 6 : 8),
+        padding: EdgeInsets.all(_resp.isVerySmall ? 6 : 8),
         decoration: BoxDecoration(
           color: isOverdue
               ? AppColors.error.withOpacity(0.1)
               : AppColors.primary.withOpacity(0.1),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(
-          Icons.assignment,
-          color: isOverdue ? AppColors.error : AppColors.primary,
-          size: _resp.smallIconSize,
-        ),
+        child: Icon(Icons.assignment,
+            color: isOverdue ? AppColors.error : AppColors.primary,
+            size: _resp.smallIconSize),
       ),
       title: Text(
         assignment['title'] ?? 'Untitled',
         style: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: _resp.smallTextSize,
-          color: AppColors.textPrimary,
-        ),
+            fontWeight: FontWeight.w600,
+            fontSize: _resp.smallTextSize,
+            color: AppColors.textPrimary),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
         'Due: ${_formatDate(assignment['dueDate'])}',
         style: TextStyle(
-          fontSize: _resp.smallCaptionSize,
-          color: isOverdue ? AppColors.error : AppColors.textSecondary,
-        ),
+            fontSize: _resp.smallCaptionSize,
+            color: isOverdue ? AppColors.error : AppColors.textSecondary),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
       ),
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -3912,10 +4105,9 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         child: Text(
           isOverdue ? 'Overdue' : 'Active',
           style: TextStyle(
-            fontSize: _resp.smallCaptionSize,
-            color: isOverdue ? AppColors.error : AppColors.success,
-            fontWeight: FontWeight.w600,
-          ),
+              fontSize: _resp.smallCaptionSize,
+              color: isOverdue ? AppColors.error : AppColors.success,
+              fontWeight: FontWeight.w600),
         ),
       ),
       onTap: () => _showAssignmentDetails(assignment),
@@ -3923,39 +4115,45 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
   }
 
   void _showAssignmentDetails(Map<String, dynamic> assignment) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
     final dueDate = DateTime.tryParse(assignment['dueDate'] ?? '');
     final isOverdue = dueDate != null && dueDate.isBefore(DateTime.now());
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          assignment['title'] ?? 'Assignment Details',
-          style: const TextStyle(color: AppColors.primary, fontSize: 16),
-        ),
+        title: Text(assignment['title'] ?? 'Assignment Details',
+            style: const TextStyle(color: AppColors.primary, fontSize: 16),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Description:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text('Description:',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(height: 4),
-              Text(assignment['description'] ?? 'No description', style: TextStyle(fontSize: 12)),
+              Text(assignment['description'] ?? 'No description',
+                  style: const TextStyle(fontSize: 12)),
               const SizedBox(height: 12),
-              const Text('Due Date:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text('Due Date:',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(height: 4),
-              Text(
-                _formatDate(assignment['dueDate']),
-                style: TextStyle(
-                  fontSize: 12,
-                  color: isOverdue ? AppColors.error : AppColors.textPrimary,
-                ),
-              ),
+              Text(_formatDate(assignment['dueDate']),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: isOverdue
+                          ? AppColors.error
+                          : AppColors.textPrimary)),
               const SizedBox(height: 12),
-              const Text('Class:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text('Class:',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(height: 4),
-              Text(assignment['className'] ?? 'N/A', style: TextStyle(fontSize: 12)),
+              Text(assignment['className'] ?? 'N/A',
+                  style: const TextStyle(fontSize: 12)),
             ],
           ),
         ),
@@ -3969,7 +4167,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== NEWS AND EVENTS ====================
+  // ==================== NEWS ====================
 
   Widget _buildNewsAndEvents() {
     if (_isLoadingNews) {
@@ -3980,8 +4178,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
+            child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
@@ -3993,16 +4190,13 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Center(
-          child: Text(
-            'No news available',
-            style: TextStyle(color: AppColors.textSecondary),
-          ),
+          child: Text('No news available',
+              style: TextStyle(color: AppColors.textSecondary)),
         ),
       );
     }
 
     final displayCount = _news.length > 2 ? 2 : _news.length;
-
     return Container(
       decoration: BoxDecoration(
         gradient: AppColors.cardGradientLight,
@@ -4019,40 +4213,32 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           return ListTile(
             dense: true,
             contentPadding: EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: _resp.isMobile ? 6 : 8,
-            ),
+                horizontal: _resp.isVerySmall ? 8 : 12, vertical: 6),
             leading: CircleAvatar(
               radius: _resp.isMobile ? 16 : 18,
               backgroundColor: AppColors.primary.withOpacity(0.1),
-              child: Icon(
-                Icons.newspaper,
-                color: AppColors.primary,
-                size: _resp.smallIconSize,
-              ),
+              child: Icon(Icons.newspaper,
+                  color: AppColors.primary, size: _resp.smallIconSize),
             ),
             title: Text(
               item['title'],
               style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: _resp.smallTextSize,
-                color: AppColors.textPrimary,
-              ),
+                  fontWeight: FontWeight.w600,
+                  fontSize: _resp.smallTextSize,
+                  color: AppColors.textPrimary),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
               item['date'],
               style: TextStyle(
-                fontSize: _resp.smallCaptionSize,
-                color: AppColors.textSecondary,
-              ),
+                  fontSize: _resp.smallCaptionSize,
+                  color: AppColors.textSecondary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
-            trailing: Icon(
-              Icons.arrow_forward_ios,
-              size: _resp.smallIconSize,
-              color: AppColors.primary,
-            ),
+            trailing: Icon(Icons.arrow_forward_ios,
+                size: _resp.smallIconSize, color: AppColors.primary),
             onTap: () => _showNewsDetails(item),
           );
         },
@@ -4089,14 +4275,10 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             decoration: InputDecoration(
               hintText: 'Search by name, class, or teacher...',
               hintStyle: TextStyle(
-                fontSize: _resp.smallTextSize,
-                color: AppColors.textSecondary,
-              ),
-              prefixIcon: Icon(
-                Icons.search,
-                color: AppColors.primary,
-                size: _resp.iconSize,
-              ),
+                  fontSize: _resp.smallTextSize,
+                  color: AppColors.textSecondary),
+              prefixIcon: Icon(Icons.search,
+                  color: AppColors.primary, size: _resp.iconSize),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                 icon: Icon(Icons.clear, size: _resp.smallIconSize),
@@ -4113,26 +4295,21 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               filled: true,
               fillColor: AppColors.greyLight,
               contentPadding: EdgeInsets.symmetric(
-                vertical: _resp.isMobile ? 8 : 10,
-                horizontal: 12,
-              ),
+                  vertical: _resp.isMobile ? 8 : 10, horizontal: 12),
             ),
           ),
         ),
         if (_isSearchingPupils)
           Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: _resp.padding,
-              vertical: 6,
-            ),
+            padding:
+            EdgeInsets.symmetric(horizontal: _resp.padding, vertical: 6),
             color: AppColors.primary.withOpacity(0.05),
             child: Text(
               'Found ${_filteredPupils.length} child${_filteredPupils.length != 1 ? 'ren' : ''}',
               style: TextStyle(
-                fontSize: _resp.smallTextSize,
-                color: AppColors.primary,
-                fontWeight: FontWeight.w500,
-              ),
+                  fontSize: _resp.smallTextSize,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w500),
             ),
           ),
         Expanded(
@@ -4144,29 +4321,21 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.search_off,
-                    size: 48,
-                    color: AppColors.grey,
-                  ),
+                  Icon(Icons.search_off,
+                      size: 48, color: AppColors.grey),
                   const SizedBox(height: 12),
-                  Text(
-                    'No children found',
-                    style: TextStyle(
-                      fontSize: _resp.bodyTextSize,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
+                  Text('No children found',
+                      style: TextStyle(
+                          fontSize: _resp.bodyTextSize,
+                          color: AppColors.textSecondary)),
                 ],
               ),
             )
                 : ListView.builder(
               padding: EdgeInsets.all(_resp.padding),
               itemCount: displayList.length,
-              itemBuilder: (context, index) {
-                final pupil = displayList[index];
-                return _buildDetailedPupilCard(pupil);
-              },
+              itemBuilder: (context, index) =>
+                  _buildDetailedPupilCard(displayList[index]),
             ),
           ),
         ),
@@ -4179,8 +4348,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         pupil['teacherPhone'] != 'Not available' &&
         pupil['teacherPhone'] != 'N/A' &&
         pupil['teacherPhone'].toString().isNotEmpty;
-    final feeAmount = pupil['feeAmount'] as double? ?? 0.0;
-    final hasFee = feeAmount > 0;
+
+    final double totalFees = (pupil['totalFees'] as num?)?.toDouble() ?? 0.0;
+    final double balance = (pupil['balance'] as num?)?.toDouble() ?? 0.0;
+    final bool hasFee = totalFees > 0;
+    final bool isCleared = hasFee && balance <= 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -4189,10 +4361,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
         gradient: AppColors.cardGradientLight,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 3,
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3),
         ],
       ),
       child: Column(
@@ -4202,7 +4371,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               Container(
                 width: _resp.avatarSize,
                 height: _resp.avatarSize,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   gradient: AppColors.cardGradient,
                   shape: BoxShape.circle,
                 ),
@@ -4225,276 +4394,232 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                     Text(
                       pupil['name'],
                       style: TextStyle(
-                        fontSize: _resp.bodyTextSize,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
+                          fontSize: _resp.bodyTextSize,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     Text(
                       'Admission: ${pupil['admissionNo']}',
                       style: TextStyle(
-                        fontSize: _resp.smallCaptionSize,
-                        color: AppColors.textSecondary,
-                      ),
+                          fontSize: _resp.smallCaptionSize,
+                          color: AppColors.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     Text(
                       'Class: ${pupil['class']}',
                       style: TextStyle(
-                        fontSize: _resp.smallCaptionSize,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.money_rounded,
-                          size: 12,
-                          color: hasFee ? AppColors.primary : AppColors.grey,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          hasFee
-                              ? 'Fee: ₦${feeAmount.toStringAsFixed(2)}'
-                              : 'Fee: Not Set',
-                          style: TextStyle(
-                            fontSize: _resp.smallCaptionSize,
-                            color: hasFee ? AppColors.primary : AppColors.grey,
-                            fontWeight: hasFee ? FontWeight.w600 : FontWeight.normal,
-                          ),
-                        ),
-                      ],
+                          fontSize: _resp.smallCaptionSize,
+                          color: AppColors.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ],
                 ),
               ),
-              if (hasPhone)
+              if (hasPhone && !_resp.isVerySmall)
                 Container(
                   margin: const EdgeInsets.only(right: 4),
                   decoration: const BoxDecoration(
-                    color: AppColors.success,
-                    shape: BoxShape.circle,
-                  ),
+                      color: AppColors.success, shape: BoxShape.circle),
                   child: IconButton(
-                    icon: Icon(
-                      Icons.phone,
-                      color: Colors.white,
-                      size: _resp.smallIconSize,
-                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                        minWidth: 36, minHeight: 36),
+                    icon: Icon(Icons.phone,
+                        color: Colors.white, size: _resp.smallIconSize),
                     onPressed: () => _makePhoneCall(pupil['teacherPhone']),
                     tooltip: 'Call Teacher',
                   ),
                 ),
               IconButton(
-                icon: Icon(
-                  Icons.message,
-                  color: AppColors.primary,
-                  size: _resp.smallIconSize,
-                ),
+                padding: EdgeInsets.zero,
+                constraints:
+                const BoxConstraints(minWidth: 36, minHeight: 36),
+                icon: Icon(Icons.message,
+                    color: AppColors.primary, size: _resp.smallIconSize),
                 onPressed: () => _startConversationWithTeacher(pupil),
-                tooltip: 'Message Teacher',
+                tooltip: 'Message',
               ),
               IconButton(
-                icon: Icon(
-                  Icons.chevron_right,
-                  color: AppColors.primary,
-                  size: _resp.smallIconSize,
-                ),
+                padding: EdgeInsets.zero,
+                constraints:
+                const BoxConstraints(minWidth: 36, minHeight: 36),
+                icon: Icon(Icons.chevron_right,
+                    color: AppColors.primary, size: _resp.smallIconSize),
                 onPressed: () => _showPupilDetails(pupil),
                 tooltip: 'Details',
               ),
               IconButton(
-                icon: Icon(
-                  Icons.discount_rounded,
-                  color: AppColors.warning,
-                  size: _resp.smallIconSize,
-                ),
+                padding: EdgeInsets.zero,
+                constraints:
+                const BoxConstraints(minWidth: 36, minHeight: 36),
+                icon: Icon(Icons.discount_rounded,
+                    color: AppColors.warning, size: _resp.smallIconSize),
                 onPressed: () => _showStudentDiscounts(pupil),
-                tooltip: 'View Discounts',
+                tooltip: 'Discounts',
               ),
             ],
           ),
           const SizedBox(height: 10),
           Container(
-            padding: EdgeInsets.all(_resp.isMobile ? 6 : 8),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(8),
+              color: isCleared
+                  ? AppColors.success.withOpacity(0.08)
+                  : hasFee
+                  ? AppColors.warning.withOpacity(0.08)
+                  : AppColors.grey.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isCleared
+                    ? AppColors.success.withOpacity(0.3)
+                    : hasFee
+                    ? AppColors.warning.withOpacity(0.3)
+                    : AppColors.grey.withOpacity(0.2),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Class Teacher',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(height: 4),
                 Row(
                   children: [
-                    Icon(Icons.person, size: 12, color: AppColors.textSecondary),
-                    const SizedBox(width: 4),
-                    Expanded(
+                    Icon(
+                      isCleared
+                          ? Icons.check_circle
+                          : hasFee
+                          ? Icons.receipt_long
+                          : Icons.info_outline,
+                      size: 14,
+                      color: isCleared
+                          ? AppColors.success
+                          : hasFee
+                          ? AppColors.warning
+                          : AppColors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    const Expanded(
                       child: Text(
-                        pupil['teacherName'],
+                        'Fee Breakdown',
                         style: TextStyle(
-                          fontSize: _resp.smallTextSize,
-                          color: AppColors.textPrimary,
-                        ),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(Icons.phone, size: 12, color: AppColors.textSecondary),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        pupil['teacherPhone'],
-                        style: TextStyle(
-                          fontSize: _resp.smallTextSize,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(Icons.email, size: 12, color: AppColors.textSecondary),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        pupil['teacherEmail'],
-                        style: TextStyle(
-                          fontSize: _resp.smallTextSize,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 6),
+                if (hasFee)
+                  _buildFeeLine(
+                    isCleared ? 'Status' : 'Outstanding',
+                    isCleared
+                        ? 'Fully cleared ✅'
+                        : '₦${balance.toStringAsFixed(2)}',
+                    isCleared ? AppColors.success : AppColors.warning,
+                    bold: true,
+                  )
+                else
+                  Text('No outstanding fees',
+                      style: TextStyle(
+                          fontSize: _resp.smallCaptionSize,
+                          color: AppColors.grey),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1),
               ],
             ),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              if (hasFee)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => _payFeesForPupil(pupil),
-                    icon: Icon(Icons.payment, size: _resp.smallIconSize),
-                    label: Text(
-                      'Pay Fee',
-                      style: TextStyle(fontSize: _resp.buttonTextSize),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(
-                        vertical: _resp.isMobile ? 6 : 8,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+              Expanded(
+                child: hasFee && !isCleared
+                    ? ElevatedButton.icon(
+                  onPressed: () => _showFeesScreen(),
+                  icon: Icon(Icons.payment,
+                      size: _resp.smallIconSize),
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Pay Fee',
+                        style: TextStyle(
+                            fontSize: _resp.buttonTextSize),
+                        maxLines: 1),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(
+                        vertical: _resp.isMobile ? 6 : 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                )
+                    : OutlinedButton(
+                  onPressed: () => _showFeesScreen(),
+                  style: OutlinedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                        vertical: _resp.isMobile ? 6 : 8),
+                    side: BorderSide(
+                        color: hasFee
+                            ? AppColors.success
+                            : AppColors.info),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('View Fees',
+                        style: TextStyle(
+                            fontSize: _resp.buttonTextSize,
+                            color: hasFee
+                                ? AppColors.success
+                                : AppColors.info),
+                        maxLines: 1),
                   ),
                 ),
-              if (!hasFee)
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _payFeesForPupil(pupil),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(
-                        vertical: _resp.isMobile ? 6 : 8,
-                      ),
-                      side: const BorderSide(color: AppColors.warning),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: Text(
-                      'Check Fee',
-                      style: TextStyle(
-                        fontSize: _resp.buttonTextSize,
-                        color: AppColors.warning,
-                      ),
-                    ),
-                  ),
-                ),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _isLoadingResult ? null : () => _viewPupilResults(pupil),
+                  onPressed: _isLoadingResult
+                      ? null
+                      : () => _viewPupilResults(pupil),
                   style: OutlinedButton.styleFrom(
                     padding: EdgeInsets.symmetric(
-                      vertical: _resp.isMobile ? 6 : 8,
-                    ),
+                        vertical: _resp.isMobile ? 6 : 8),
                     side: const BorderSide(color: AppColors.primary),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   child: _isLoadingResult
                       ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.primary,
-                    ),
-                  )
-                      : Text(
-                    'View Result',
-                    style: TextStyle(
-                      fontSize: _resp.buttonTextSize,
-                      color: AppColors.primary,
-                    ),
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary))
+                      : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('View Result',
+                        style: TextStyle(
+                            fontSize: _resp.buttonTextSize,
+                            color: AppColors.primary),
+                        maxLines: 1),
                   ),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _showStudentDiscounts(pupil),
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.symmetric(
-                  vertical: _resp.isMobile ? 6 : 8,
-                ),
-                side: const BorderSide(color: AppColors.warning),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              icon: Icon(
-                Icons.discount_rounded,
-                color: AppColors.warning,
-                size: _resp.smallIconSize,
-              ),
-              label: Text(
-                'View Discounts',
-                style: TextStyle(
-                  fontSize: _resp.buttonTextSize,
-                  color: AppColors.warning,
-                ),
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 
-  // ==================== WALLET SCREEN ====================
+  // ==================== WALLET ====================
 
   Widget _buildWalletScreen() {
     return SingleChildScrollView(
@@ -4502,14 +4627,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'My Wallet',
-            style: TextStyle(
-              fontSize: _resp.pageTitleSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
+          Text('My Wallet',
+              style: TextStyle(
+                  fontSize: _resp.pageTitleSize,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary)),
           const SizedBox(height: 16),
           Container(
             padding: EdgeInsets.all(_resp.cardPadding),
@@ -4518,24 +4640,26 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  blurRadius: 10,
-                ),
+                    color: AppColors.primary.withOpacity(0.3),
+                    blurRadius: 10),
               ],
             ),
             child: Column(
               children: [
-                const Text(
-                  'Available Balance',
-                  style: TextStyle(fontSize: 13, color: AppColors.white),
-                ),
+                const Text('Available Balance',
+                    style: TextStyle(
+                        fontSize: 13, color: AppColors.white)),
                 const SizedBox(height: 8),
-                Text(
-                  '₦${_walletBalance.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: _resp.largeValueSize,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.white,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '₦${_walletBalance.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: _resp.largeValueSize,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.white,
+                    ),
+                    maxLines: 1,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -4548,12 +4672,16 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                           backgroundColor: AppColors.white,
                           foregroundColor: AppColors.primary,
                           padding: EdgeInsets.symmetric(
-                            vertical: _resp.buttonVerticalPadding,
-                          ),
+                              vertical: _resp.buttonVerticalPadding),
                         ),
-                        child: Text(
-                          _resp.isMobile ? 'Fund' : 'Fund Wallet',
-                          style: TextStyle(fontSize: _resp.buttonTextSize),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _resp.isVerySmall ? 'Fund' : 'Fund Wallet',
+                            style:
+                            TextStyle(fontSize: _resp.buttonTextSize),
+                            maxLines: 1,
+                          ),
                         ),
                       ),
                     ),
@@ -4565,12 +4693,14 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
                           foregroundColor: AppColors.white,
                           side: const BorderSide(color: AppColors.white),
                           padding: EdgeInsets.symmetric(
-                            vertical: _resp.buttonVerticalPadding,
-                          ),
+                              vertical: _resp.buttonVerticalPadding),
                         ),
-                        child: Text(
-                          _resp.isMobile ? 'Withdraw' : 'Withdraw',
-                          style: TextStyle(fontSize: _resp.buttonTextSize),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Withdraw',
+                              style: TextStyle(
+                                  fontSize: _resp.buttonTextSize),
+                              maxLines: 1),
                         ),
                       ),
                     ),
@@ -4589,19 +4719,20 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Account Details',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
+                const Text('Account Details',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary)),
                 const SizedBox(height: 10),
-                _buildInfoRow('Account Name', _accountName.isNotEmpty ? _accountName : 'N/A'),
-                _buildInfoRow('Account Number', _accountNumber.isNotEmpty ? _accountNumber : 'N/A'),
-                _buildInfoRow('Bank Name', _bankName.isNotEmpty ? _bankName : 'N/A'),
-                _buildInfoRow('Ledger Balance', '₦${_ledgerBalance.toStringAsFixed(2)}'),
+                _buildInfoRow('Account Name',
+                    _accountName.isNotEmpty ? _accountName : 'N/A'),
+                _buildInfoRow('Account Number',
+                    _accountNumber.isNotEmpty ? _accountNumber : 'N/A'),
+                _buildInfoRow('Bank Name',
+                    _bankName.isNotEmpty ? _bankName : 'N/A'),
+                _buildInfoRow('Ledger Balance',
+                    '₦${_ledgerBalance.toStringAsFixed(2)}'),
               ],
             ),
           ),
@@ -4610,34 +4741,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: _resp.smallTextSize,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: _resp.smallTextSize,
-              fontWeight: FontWeight.w500,
-              color: AppColors.textPrimary,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==================== PROFILE SCREEN ====================
+  // ==================== PROFILE ====================
 
   Widget _buildProfileScreen() {
     return SingleChildScrollView(
@@ -4653,14 +4757,15 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  blurRadius: 10,
-                ),
+                    color: AppColors.primary.withOpacity(0.3),
+                    blurRadius: 10),
               ],
             ),
             child: Center(
               child: Text(
-                _currentUser.name.isNotEmpty ? _currentUser.name[0].toUpperCase() : 'G',
+                _currentUser.name.isNotEmpty
+                    ? _currentUser.name[0].toUpperCase()
+                    : 'G',
                 style: TextStyle(
                   fontSize: _resp.avatarLargeTextSize,
                   fontWeight: FontWeight.bold,
@@ -4673,10 +4778,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
           Text(
             _currentUser.name.isNotEmpty ? _currentUser.name : 'Guardian',
             style: TextStyle(
-              fontSize: _resp.titleSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
+                fontSize: _resp.titleSize,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
           const SizedBox(height: 20),
           Container(
@@ -4688,30 +4794,32 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Personal Information',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
+                const Text('Personal Information',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary)),
                 const SizedBox(height: 12),
-                _buildProfileRow(Icons.person, 'Full Name', _currentUser.name.isNotEmpty ? _currentUser.name : 'N/A'),
+                _buildProfileRow(
+                    Icons.person,
+                    'Full Name',
+                    _currentUser.name.isNotEmpty
+                        ? _currentUser.name
+                        : 'N/A'),
                 _buildProfileRow(Icons.email, 'Email', _currentUser.email),
-                _buildProfileRow(Icons.phone, 'Phone', _currentUser.phone ?? 'N/A'),
+                _buildProfileRow(
+                    Icons.phone, 'Phone', _currentUser.phone ?? 'N/A'),
                 const SizedBox(height: 12),
-                const Text(
-                  'School Information',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
+                const Text('School Information',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary)),
                 const SizedBox(height: 12),
-                _buildProfileRow(Icons.school, 'School', _currentUser.schoolName),
-                _buildProfileRow(Icons.calendar_today, 'Session', _currentUser.sessionId),
+                _buildProfileRow(
+                    Icons.school, 'School', _currentUser.schoolName),
+                _buildProfileRow(Icons.calendar_today, 'Session',
+                    _currentUser.sessionId),
                 _buildProfileRow(Icons.book, 'Term', _currentUser.term),
               ],
             ),
@@ -4725,6 +4833,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: _resp.smallIconSize, color: AppColors.primary),
           const SizedBox(width: 10),
@@ -4732,22 +4841,19 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: _resp.smallCaptionSize,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: _resp.smallTextSize,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: _resp.smallCaptionSize,
+                        color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
+                Text(value,
+                    style: TextStyle(
+                        fontSize: _resp.smallTextSize,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2),
               ],
             ),
           ),
@@ -4756,7 +4862,7 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
     );
   }
 
-  // ==================== MORE SCREEN ====================
+  // ==================== MORE ====================
 
   Widget _buildMoreScreen() {
     return SingleChildScrollView(
@@ -4764,14 +4870,11 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'More Options',
-            style: TextStyle(
-              fontSize: _resp.pageTitleSize,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
+          Text('More Options',
+              style: TextStyle(
+                  fontSize: _resp.pageTitleSize,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary)),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
@@ -4780,34 +4883,45 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
             ),
             child: Column(
               children: [
-                _buildMoreOption(Icons.payments, 'School Fees', 'Pay school fees', _showFeesScreen),
-                _buildMoreOption(Icons.receipt_long, 'Other Fees', 'View additional fees', _showOtherFeesScreen),
-                _buildMoreOption(Icons.assignment, 'All Assignments', 'View all assignments', _showAllAssignments),
-                _buildMoreOption(Icons.discount_rounded, 'Student Discounts', 'View all student discounts', _showDiscountsScreen),
-                _buildMoreOption(Icons.message, 'Messages', 'View all messages', _navigateToMessages),
-                _buildMoreOption(Icons.newspaper, 'All News', 'View all news', _showAllNews),
-                _buildMoreOption(Icons.credit_card, 'Request Loan', 'Apply for a loan', _navigateToLoanRequest),
-                _buildMoreOption(Icons.help, 'Help & Support', 'Get assistance', () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Help & Support', style: TextStyle(color: AppColors.primary)),
-                      content: const Text(
-                        'For assistance, please contact:\n\n'
-                            '📧 support@educatmobile.com\n'
-                            '📞 +234 800 000 0000\n\n'
-                            'Our team is available 24/7 to help you.',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Close'),
+                _buildMoreOption(Icons.payments, 'Fees & Payments',
+                    'View all outstanding fees', _showFeesScreen),
+                _buildMoreOption(Icons.history, 'Payment History',
+                    'View all payment transactions', _showTransactionHistory),
+                _buildMoreOption(Icons.assignment, 'All Assignments',
+                    'View all assignments', _showAllAssignments),
+                _buildMoreOption(Icons.discount_rounded, 'Student Discounts',
+                    'View all discounts', _showDiscountsScreen),
+                _buildMoreOption(Icons.message, 'Messages',
+                    'View all messages', _navigateToMessages),
+                _buildMoreOption(Icons.newspaper, 'All News',
+                    'View all news', _showAllNews),
+                _buildMoreOption(Icons.credit_card, 'Request Loan',
+                    'Apply for a loan', _navigateToLoanRequest),
+                _buildMoreOption(Icons.help, 'Help & Support',
+                    'Get assistance', () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Help & Support',
+                              style: TextStyle(color: AppColors.primary)),
+                          content: const Text(
+                            'For assistance, please contact:\n\n'
+                                '📧 support@educatmobile.com\n'
+                                '📞 +234 800 000 0000\n\n'
+                                'Our team is available 24/7 to help you.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  );
-                }),
-                _buildMoreOption(Icons.logout, 'Logout', 'Sign out', _showLogoutDialog, isDestructive: true),
+                      );
+                    }),
+                _buildMoreOption(
+                    Icons.logout, 'Logout', 'Sign out', _showLogoutDialog,
+                    isDestructive: true),
               ],
             ),
           ),
@@ -4825,77 +4939,569 @@ Bank Name: ${_bankName.isNotEmpty ? _bankName : 'N/A'}
       }) {
     return ListTile(
       contentPadding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: _resp.isMobile ? 6 : 8,
-      ),
+          horizontal: _resp.isVerySmall ? 8 : 12,
+          vertical: _resp.isMobile ? 6 : 8),
       leading: Icon(
         icon,
         color: isDestructive ? AppColors.error : AppColors.primary,
         size: _resp.iconSize,
       ),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontWeight: FontWeight.w500,
-          color: isDestructive ? AppColors.error : AppColors.textPrimary,
-          fontSize: _resp.bodyTextSize,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(
-          fontSize: _resp.smallTextSize,
-          color: AppColors.textSecondary,
-        ),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        size: _resp.smallIconSize,
-        color: AppColors.primary,
-      ),
+      title: Text(title,
+          style: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: isDestructive ? AppColors.error : AppColors.textPrimary,
+              fontSize: _resp.bodyTextSize),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1),
+      subtitle: Text(subtitle,
+          style: TextStyle(
+              fontSize: _resp.smallTextSize,
+              color: AppColors.textSecondary),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1),
+      trailing: Icon(Icons.arrow_forward_ios,
+          size: _resp.smallIconSize, color: AppColors.primary),
       onTap: onTap,
+    );
+  }
+
+  // ==================== LOAN APPLICATIONS ====================
+
+  Widget _buildLoanApplicationsSection() {
+    final activeApps = _loanProvider.activeApplications;
+    final hasActiveApps = activeApps.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle(
+            'Loan Applications', hasActiveApps ? 'View All' : null),
+        const SizedBox(height: 8),
+        if (_loanProvider.isLoading)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: AppColors.cardGradientLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+                child: CircularProgressIndicator(color: AppColors.primary)),
+          )
+        else if (activeApps.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: AppColors.cardGradientLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.credit_card_off,
+                    size: 40, color: AppColors.grey),
+                const SizedBox(height: 8),
+                Text('No active loan applications',
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: _resp.bodyTextSize),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: _navigateToLoanRequest,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Apply for Loan'),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              gradient: AppColors.cardGradientLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: activeApps.length > 2 ? 2 : activeApps.length,
+              separatorBuilder: (context, index) =>
+                  Divider(height: 0.5, color: AppColors.greyLight),
+              itemBuilder: (context, index) =>
+                  _buildLoanApplicationTile(activeApps[index]),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLoanApplicationTile(LoanApplication application) {
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(
+          horizontal: _resp.isVerySmall ? 8 : 12, vertical: 6),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: application.statusColor.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(application.statusIcon,
+            color: application.statusColor, size: _resp.smallIconSize),
+      ),
+      title: Text(
+        'Application #${application.id.length > 8 ? application.id.substring(0, 8) : application.id}',
+        style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: _resp.smallTextSize,
+            color: AppColors.textPrimary),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Status: ${application.statusDisplay}',
+              style: TextStyle(
+                  fontSize: _resp.smallCaptionSize,
+                  color: application.statusColor,
+                  fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1),
+          if (application.requestedAmount != null)
+            Text(
+              'Amount: ₦${application.requestedAmount!.toStringAsFixed(2)}',
+              style: TextStyle(
+                  fontSize: _resp.smallCaptionSize,
+                  color: AppColors.textSecondary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          Text('Updated: ${_formatDate(application.updatedAt.toString())}',
+              style: TextStyle(
+                  fontSize: _resp.smallCaptionSize,
+                  color: AppColors.textSecondary),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1),
+        ],
+      ),
+      trailing: Icon(Icons.chevron_right,
+          color: AppColors.primary, size: _resp.smallIconSize),
+      onTap: () => _navigateToLoanApplication(application),
+    );
+  }
+
+  // ==================== DISCOUNT CARDS ====================
+
+  Widget _buildStudentDiscountCard(
+      Map<String, dynamic> pupil, List<DiscountModel> discounts) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(_resp.isVerySmall ? 10 : 16),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradientLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: discounts.isNotEmpty
+              ? AppColors.primary.withOpacity(0.3)
+              : AppColors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: _resp.isVerySmall ? 16 : 22,
+                backgroundColor: AppColors.primary.withOpacity(0.1),
+                child: Text(
+                  pupil['name'][0].toUpperCase(),
+                  style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: _resp.isVerySmall ? 13 : 16),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(pupil['name'],
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: _resp.isVerySmall ? 13 : 15,
+                            color: AppColors.textPrimary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                    Text(pupil['class'],
+                        style: TextStyle(
+                            fontSize: _resp.smallCaptionSize,
+                            color: AppColors.textSecondary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: discounts.isEmpty
+                      ? Colors.grey[200]
+                      : AppColors.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  discounts.isEmpty ? 'None' : '${discounts.length}',
+                  style: TextStyle(
+                      fontSize: _resp.isVerySmall ? 10 : 12,
+                      fontWeight: FontWeight.w600,
+                      color: discounts.isEmpty
+                          ? Colors.grey[600]
+                          : AppColors.success),
+                ),
+              ),
+            ],
+          ),
+          if (discounts.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            ...discounts.map((d) => _buildDiscountItem(d)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscountItem(DiscountModel discount) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.all(_resp.isVerySmall ? 8 : 10),
+      decoration: BoxDecoration(
+        color: discount.isValid
+            ? AppColors.primary.withOpacity(0.05)
+            : AppColors.grey.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: discount.isValid
+              ? AppColors.primary.withOpacity(0.2)
+              : AppColors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: discount.isValid
+                  ? AppColors.primary.withOpacity(0.1)
+                  : AppColors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(
+              discount.isValid ? Icons.check_circle : Icons.cancel,
+              size: 16,
+              color: discount.isValid ? AppColors.success : AppColors.grey,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(discount.discountType,
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: _resp.isVerySmall ? 11 : 13,
+                        color: discount.isValid
+                            ? AppColors.textPrimary
+                            : AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
+                if (discount.description.isNotEmpty)
+                  Text(discount.description,
+                      style: TextStyle(
+                          fontSize: _resp.smallCaptionSize,
+                          color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(discount.formattedAmount,
+                          style: TextStyle(
+                              fontSize: _resp.smallCaptionSize,
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: discount.statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(discount.statusText,
+                          style: TextStyle(
+                              fontSize: _resp.smallCaptionSize,
+                              color: discount.statusColor,
+                              fontWeight: FontWeight.w500)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== HMO RECORD ====================
+
+  Widget _buildHMORecordCard(Map<String, dynamic> record) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.all(_resp.isVerySmall ? 8 : 12),
+      decoration: BoxDecoration(
+        gradient: AppColors.cardGradientLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: record['visitType'] == 'School'
+                      ? AppColors.info.withOpacity(0.1)
+                      : AppColors.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  record['visitType'] == 'School'
+                      ? Icons.school
+                      : Icons.home,
+                  size: 16,
+                  color: record['visitType'] == 'School'
+                      ? AppColors.info
+                      : AppColors.success,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(record['hospitalName'] ?? 'Hospital Visit',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: _resp.isVerySmall ? 12 : 14),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                    Text(record['date'] ?? 'Date not specified',
+                        style: TextStyle(
+                            fontSize: _resp.smallCaptionSize,
+                            color: AppColors.textSecondary),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: record['hmoCovered'] == true
+                      ? AppColors.success.withOpacity(0.1)
+                      : AppColors.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  record['hmoCovered'] == true ? 'HMO' : 'Out of Pocket',
+                  style: TextStyle(
+                      fontSize: _resp.smallCaptionSize,
+                      color: record['hmoCovered'] == true
+                          ? AppColors.success
+                          : AppColors.error),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (record['diagnosis'] != null &&
+              record['diagnosis'].toString().isNotEmpty)
+            Text('Diagnosis: ${record['diagnosis']}',
+                style: TextStyle(fontSize: _resp.smallTextSize),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+          if (record['treatment'] != null &&
+              record['treatment'].toString().isNotEmpty)
+            Text('Treatment: ${record['treatment']}',
+                style: TextStyle(fontSize: _resp.smallTextSize),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+          if (record['doctorName'] != null &&
+              record['doctorName'].toString().isNotEmpty)
+            Text('Doctor: ${record['doctorName']}',
+                style: TextStyle(
+                    fontSize: _resp.smallCaptionSize,
+                    color: AppColors.textSecondary),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Container(
+            padding:
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Total Cost',
+                    style: TextStyle(
+                        fontSize: _resp.smallCaptionSize,
+                        color: AppColors.textSecondary)),
+                Text(
+                  '₦${(record['cost'] as double).toStringAsFixed(2)}',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: _resp.smallTextSize,
+                      color: AppColors.primary),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== MISC ====================
+
+  void _showTransactionHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const PaymentHistoryScreen(),
+      ),
+    );
+  }
+
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title:
+        const Text('Logout', style: TextStyle(color: AppColors.error)),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final authProvider =
+              Provider.of<AuthProvider>(context, listen: false);
+              await authProvider.logout();
+              if (mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const LoginScreen()),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// Helper class for responsive sizing
+// ==================== RESPONSIVE INFO ====================
+
 class ResponsiveInfo {
   final double screenWidth;
 
   ResponsiveInfo(this.screenWidth);
 
+  bool get isVerySmall => screenWidth < 380;
   bool get isMobile => screenWidth < 600;
   bool get isTablet => screenWidth >= 600 && screenWidth < 1200;
   bool get isDesktop => screenWidth >= 1200;
 
-  double get padding => isMobile ? 12 : isTablet ? 16 : 20;
-  double get cardPadding => isMobile ? 10 : isTablet ? 12 : 16;
-  double get gridSpacing => isMobile ? 8 : 12;
+  double get padding => isVerySmall ? 8 : isMobile ? 12 : isTablet ? 16 : 20;
+  double get cardPadding =>
+      isVerySmall ? 8 : isMobile ? 10 : isTablet ? 12 : 16;
+  double get gridSpacing => isVerySmall ? 6 : isMobile ? 8 : 12;
 
-  int get statsGridColumns => isMobile ? 2 : (isTablet ? 3 : 4);
-  int get quickActionsColumns => isMobile ? 4 : (isTablet ? 5 : 6);
+  int get statsGridColumns =>
+      isVerySmall ? 2 : isMobile ? 2 : (isTablet ? 3 : 4);
+  int get quickActionsColumns =>
+      isVerySmall ? 3 : isMobile ? 4 : (isTablet ? 5 : 6);
   double get statsAspectRatio => isMobile ? 1.4 : 1.3;
-  double get actionAspectRatio => isMobile ? 1 : 0.9;
+  double get actionAspectRatio => isVerySmall ? 1.0 : isMobile ? 1.0 : 0.9;
 
-  double get titleSize => isMobile ? 20 : (isTablet ? 24 : 28);
-  double get pageTitleSize => isMobile ? 24 : (isTablet ? 28 : 32);
-  double get sectionTitleSize => isMobile ? 16 : (isTablet ? 18 : 20);
-  double get bodyTextSize => isMobile ? 13 : (isTablet ? 14 : 15);
-  double get smallTextSize => isMobile ? 11 : (isTablet ? 12 : 13);
-  double get captionSize => isMobile ? 10 : (isTablet ? 11 : 12);
-  double get smallCaptionSize => isMobile ? 9 : (isTablet ? 10 : 11);
-  double get valueSize => isMobile ? 14 : (isTablet ? 16 : 18);
-  double get largeValueSize => isMobile ? 28 : (isTablet ? 32 : 36);
+  double get titleSize =>
+      isVerySmall ? 18 : isMobile ? 20 : (isTablet ? 24 : 28);
+  double get pageTitleSize =>
+      isVerySmall ? 20 : isMobile ? 24 : (isTablet ? 28 : 32);
+  double get sectionTitleSize =>
+      isVerySmall ? 14 : isMobile ? 16 : (isTablet ? 18 : 20);
+  double get bodyTextSize =>
+      isVerySmall ? 12 : isMobile ? 13 : (isTablet ? 14 : 15);
+  double get smallTextSize =>
+      isVerySmall ? 10 : isMobile ? 11 : (isTablet ? 12 : 13);
+  double get captionSize =>
+      isVerySmall ? 9 : isMobile ? 10 : (isTablet ? 11 : 12);
+  double get smallCaptionSize =>
+      isVerySmall ? 8 : isMobile ? 9 : (isTablet ? 10 : 11);
+  double get valueSize =>
+      isVerySmall ? 13 : isMobile ? 14 : (isTablet ? 16 : 18);
+  double get largeValueSize =>
+      isVerySmall ? 22 : isMobile ? 28 : (isTablet ? 32 : 36);
 
-  double get iconSize => isMobile ? 20 : (isTablet ? 22 : 24);
-  double get smallIconSize => isMobile ? 16 : (isTablet ? 18 : 20);
+  double get iconSize =>
+      isVerySmall ? 18 : isMobile ? 20 : (isTablet ? 22 : 24);
+  double get smallIconSize =>
+      isVerySmall ? 14 : isMobile ? 16 : (isTablet ? 18 : 20);
 
-  double get avatarSize => isMobile ? 40 : (isTablet ? 45 : 50);
-  double get avatarLargeSize => isMobile ? 80 : (isTablet ? 90 : 100);
-  double get avatarTextSize => isMobile ? 16 : (isTablet ? 18 : 20);
-  double get avatarLargeTextSize => isMobile ? 32 : (isTablet ? 36 : 40);
+  double get avatarSize =>
+      isVerySmall ? 34 : isMobile ? 40 : (isTablet ? 45 : 50);
+  double get avatarLargeSize =>
+      isVerySmall ? 70 : isMobile ? 80 : (isTablet ? 90 : 100);
+  double get avatarTextSize =>
+      isVerySmall ? 14 : isMobile ? 16 : (isTablet ? 18 : 20);
+  double get avatarLargeTextSize =>
+      isVerySmall ? 28 : isMobile ? 32 : (isTablet ? 36 : 40);
 
-  double get buttonTextSize => isMobile ? 11 : (isTablet ? 12 : 13);
-  double get buttonVerticalPadding => isMobile ? 8 : (isTablet ? 10 : 12);
-  double get actionLabelSize => isMobile ? 9 : (isTablet ? 10 : 11);
+  double get buttonTextSize =>
+      isVerySmall ? 10 : isMobile ? 11 : (isTablet ? 12 : 13);
+  double get buttonVerticalPadding =>
+      isVerySmall ? 6 : isMobile ? 8 : (isTablet ? 10 : 12);
+  double get actionLabelSize =>
+      isVerySmall ? 8 : isMobile ? 9 : (isTablet ? 10 : 11);
 }

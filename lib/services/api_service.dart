@@ -7,8 +7,8 @@ import '../models/user_model.dart';
 import '../utils/jwt_decoder.dart';
 
 class ApiService {
-  //static const String baseUrl = 'https://educat.codeweb.com.ng/api';
-  static const String baseUrl = 'https://scrmapi-lpkm.onrender.com/api';
+  static const String baseUrl = 'https://educat.codeweb.com.ng/api';
+  //static const String baseUrl = 'https://scrmapi-lpkm.onrender.com/api';
   static const String loginEndpoint = '/Login/Login';
   static const Duration timeout = Duration(seconds: 30);
 
@@ -118,6 +118,218 @@ class ApiService {
         'success': true,
         'data': [],
         'message': 'Could not fetch students: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Initiate payment for a specific fee
+  Future<Map<String, dynamic>> initiateFeePayment({
+    required String token,
+    required String studentId,
+    required String classroomId,
+    required String feeId,
+    required String feeType,       // 'ClassFee' or 'OtherFee'
+    required double amount,
+    required String sessionId,
+    required String termId,
+    required String customerEmail,
+    required String gateway,
+    required String redirectUrl,
+    required String callbackUrl,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Payment/InitiateFeePayment');
+      print('📤 Initiating fee payment at: $url');
+
+      final requestBody = {
+        'studentId': studentId,
+        'classroomId': classroomId,
+        'feeId': feeId,
+        'feeType': feeType,
+        'amount': amount,
+        'sessionId': sessionId,
+        'termId': termId,
+        'customerEmail': customerEmail,
+        'gateway': gateway,
+        'redirectUrl': redirectUrl,
+        'callbackUrl': callbackUrl,
+      };
+
+      print('📤 Request: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {'success': false, 'message': 'Empty response from server'};
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Payment initiated',
+          'data': responseData['data'],
+          'checkoutUrl': responseData['data']?['checkoutUrl'],
+          'reference': responseData['data']?['reference'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to initiate payment',
+        };
+      }
+    } catch (e) {
+      print('❌ Initiate fee payment error: $e');
+      return {'success': false, 'message': 'Network error: ${e.toString()}'};
+    }
+  }
+
+  /// Get guardian's pending (outstanding) fees for all their students
+  Future<Map<String, dynamic>> getGuardianPendingPayments({
+    required String token,
+    required String guardianId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/GuardianPayment/$guardianId/pending');
+      print('📤 Fetching pending payments at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'students': [],
+          'grandTotalDue': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final data = responseData['data'];
+        final students = (data?['students'] as List?) ?? [];
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Success',
+          'guardianId': data?['guardianId'] ?? '',
+          'guardianName': data?['guardianName'] ?? '',
+          'students': students,
+          'grandTotalDue': (data?['grandTotalDue'] as num?)?.toDouble() ?? 0.0,
+          'rawData': data,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch pending fees',
+          'students': [],
+          'grandTotalDue': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get guardian pending payments error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'students': [],
+        'grandTotalDue': 0.0,
+      };
+    }
+  }
+
+  /// Get student payment balance by term
+  Future<Map<String, dynamic>> getStudentPaymentBalanceByTermId({
+    required String token,
+    required String studentId,
+    required String sessionId,
+    required String termId,
+  }) async {
+    try {
+      final url = Uri.parse(
+        '$baseUrl/Payment/GetStudentPaymentBalanceByTermId'
+            '?studentId=$studentId'
+            '&sessionId=${Uri.encodeComponent(sessionId)}'
+            '&termId=$termId',
+      );
+      print('📤 Fetching student payment balance at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'balance': 0.0,
+          'totalFees': 0.0,
+          'totalPaid': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final data = responseData['data'];
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Balance retrieved',
+          'balance': (data?['balance'] ?? 0).toDouble(),
+          'totalFees': (data?['totalFees'] ?? 0).toDouble(),
+          'totalPaid': (data?['totalPaid'] ?? 0).toDouble(),
+          'classroomId': data?['classroomId'] ?? '',
+          'sessionId': data?['sessionId'] ?? '',
+          'termId': data?['paymentTermId'] ?? '',
+          'rawData': data,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch balance',
+          'balance': 0.0,
+          'totalFees': 0.0,
+          'totalPaid': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get student payment balance error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'balance': 0.0,
+        'totalFees': 0.0,
+        'totalPaid': 0.0,
       };
     }
   }
@@ -243,6 +455,73 @@ class ApiService {
       };
     }
   }
+
+  /// Get guardian's payment history
+  Future<Map<String, dynamic>> getGuardianPaymentHistory({
+    required String token,
+    required String guardianId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/GuardianPayment/$guardianId/history');
+      print('📤 Fetching payment history at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'payments': [],
+          'totalPaid': 0.0,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final data = responseData['data'];
+        final List<dynamic> payments = (data?['payments'] as List?) ?? [];
+
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Success',
+          'guardianId': data?['guardianId'] ?? '',
+          'guardianName': data?['guardianName'] ?? '',
+          'payments': payments
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+          'totalPaid': (data?['totalPaid'] as num?)?.toDouble() ?? 0.0,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to fetch payment history',
+          'payments': [],
+          'totalPaid': 0.0,
+        };
+      }
+    } catch (e) {
+      print('❌ Get payment history error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'payments': [],
+        'totalPaid': 0.0,
+      };
+    }
+  }
+
+
 
   // ==================== STUDENT RESULT ENDPOINTS ====================
 
@@ -519,6 +798,116 @@ class ApiService {
 
 // CLOCK IN - Updated to use http instead of Dio
   // ==================== TEACHER ATTENDANCE ENDPOINTS ====================
+
+// ==================== ADMIN: TEACHER ATTENDANCE ====================
+
+
+  Future<Map<String, dynamic>> getAllTeachersTodayAttendance({
+    required String token,
+    required String schoolId,
+  }) async {
+    try {
+      final url = Uri.parse(
+          '$baseUrl/TeacherAttendance/AllTodayAttendance?schoolId=$schoolId');
+      print('📤 getAllTeachersTodayAttendance → $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 ${response.statusCode}: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response',
+          'records': <Map<String, dynamic>>[],
+          'summary': {'total': 0, 'present': 0, 'absent': 0, 'late': 0},
+        };
+      }
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['status'] == true) {
+        final raw = data['data'];
+
+        List<Map<String, dynamic>> records = [];
+
+        if (raw is List) {
+          records = raw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        } else if (raw is Map) {
+          // Defensive: handle wrapped shapes
+          final maybeList = raw['records'] ??
+              raw['attendance'] ??
+              raw['teachers'] ??
+              raw['data'];
+          if (maybeList is List) {
+            records = maybeList
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+          }
+        }
+
+        final summary = {
+          'total': records.length,
+          'present': records.where((r) => _isPresent(r)).length,
+          'absent': records.where((r) => !_isPresent(r)).length,
+          'late': records.where((r) => _isLate(r)).length,
+        };
+
+        return {
+          'success': true,
+          'message': data['responseMessage'] ?? 'Attendance loaded',
+          'records': records,
+          'summary': summary,
+        };
+      }
+
+      return {
+        'success': false,
+        'message': data['responseMessage'] ?? 'Failed to fetch attendance',
+        'records': <Map<String, dynamic>>[],
+        'summary': {'total': 0, 'present': 0, 'absent': 0, 'late': 0},
+      };
+    } catch (e) {
+      print('❌ getAllTeachersTodayAttendance error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'records': <Map<String, dynamic>>[],
+        'summary': {'total': 0, 'present': 0, 'absent': 0, 'late': 0},
+      };
+    }
+  }
+
+// Normalize status across possible backend field names
+  bool _isPresent(Map<String, dynamic> r) {
+    final v = r['status'] ?? r['statusCode'] ?? r['isPresent'] ?? r['present'];
+    if (v is bool) return v;
+    if (v is num) return v == 1;
+    if (v is String) {
+      final s = v.toLowerCase();
+      return s == 'present' || s == '1' || s == 'true' || s == 'clocked in';
+    }
+    final inTime = r['clockInTime'];
+    return inTime != null && inTime.toString().isNotEmpty;
+  }
+
+  bool _isLate(Map<String, dynamic> r) {
+    final v = r['status'] ?? r['statusCode'];
+    if (v is String) return v.toLowerCase() == 'late';
+    return r['isLate'] == true;
+  }
+
 
 // CLOCK IN - Complete working version
   Future<Map<String, dynamic>> clockIn({
@@ -996,7 +1385,7 @@ class ApiService {
   Future<Map<String, dynamic>> uploadCreditAssessment({
     required String token,
     required String guardianId,
-    required String edubanclSchoolId,
+    required String internalSchoolId,
     required String bankAccountNumber,
     required String bankCode,
     required String bankName,
@@ -1021,7 +1410,7 @@ class ApiService {
 
       // Add fields
       request.fields['guardianId'] = guardianId;
-      request.fields['EdubanclSchoolId'] = edubanclSchoolId;
+      request.fields['internalSchoolId'] = internalSchoolId;
       request.fields['bankAccountNumber'] = bankAccountNumber;
       request.fields['bankCode'] = bankCode;
       request.fields['bankName'] = bankName;
@@ -1197,7 +1586,6 @@ class ApiService {
         'guardianId': guardianId,
         'studentId': studentId,
         'internalSchoolId': internalSchoolId,
-        'edubanclSchoolId': edubanclSchoolId,
         'creditAssessmentId': creditAssessmentId,
         'loanType': loanType,
         'term': term,
@@ -1330,6 +1718,128 @@ class ApiService {
     }
   }
 
+  /// Setup Repayment Mandate (Step 6)
+  Future<Map<String, dynamic>> setupMandate({
+    required String token,
+    required String applicationId,
+    required String accountNumber,
+    required String bankCode,
+    required String accountName,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/loans/$applicationId/setup-mandate');
+      print('📤 Setting up mandate at: $url');
+
+      final requestBody = {
+        'accountNumber': accountNumber,
+        'bankCode': bankCode,
+        'accountName': accountName,
+      };
+
+      print('📤 Request: ${jsonEncode(requestBody)}');
+
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        return {
+          'success': true,
+          'message': responseData['responseMessage'] ?? 'Mandate setup initiated',
+          'authorizationUrl': responseData['authorizationUrl'] ??
+              responseData['data']?['mandateAuthorizationUrl'],
+          'applicationId': responseData['data']?['id'],
+          'status': responseData['data']?['status'],
+          'statusLabel': responseData['data']?['statusLabel'],
+          'data': responseData['data'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to setup mandate',
+          'responseCode': responseData['responseCode'],
+        };
+      }
+    } catch (e) {
+      print('❌ Setup mandate error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Poll Loan Status (Step 7)
+  Future<Map<String, dynamic>> pollLoanStatus({
+    required String token,
+    required String applicationId,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl/Edubancl/loans/$applicationId/status');
+      print('📤 Polling loan status at: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 Response Status: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {'success': false, 'message': 'Empty response from server'};
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && responseData['status'] == true) {
+        final bool isPending = responseData['isPending'] ?? false;
+        final Map<String, dynamic>? data = responseData['data'] as Map<String, dynamic>?;
+
+        return {
+          'success': true,
+          'isPending': isPending,
+          'data': data,
+          'id': data?['id'],
+          'status': data?['status'],
+          'statusLabel': data?['statusLabel'],
+          'message': data?['edubanc1StatusMessage'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': responseData['responseMessage'] ?? 'Failed to get loan status',
+        };
+      }
+    } catch (e) {
+      print('❌ Poll loan status error: $e');
+      return {'success': false, 'message': 'Network error: ${e.toString()}'};
+    }
+  }
+
+
   /// Get Guardian Loan Applications
   Future<Map<String, dynamic>> getGuardianApplications({
     required String token,
@@ -1393,7 +1903,7 @@ class ApiService {
   Future<Map<String, dynamic>> initiateBvnVerification({
     required String token,  // Add this parameter
     required String guardianId,
-    required String edubanclSchoolId,
+    required String internalSchoolId,
   }) async {
     try {
       final url = Uri.parse('$baseUrl/Edubancl/bvn/initiate');
@@ -1401,7 +1911,7 @@ class ApiService {
 
       final requestBody = {
         'guardianId': guardianId,
-        'edubanclSchoolId': edubanclSchoolId,
+        'internalSchoolId': internalSchoolId,
       };
 
       print('📤 Request Body: ${jsonEncode(requestBody)}');
@@ -1460,7 +1970,7 @@ class ApiService {
   Future<Map<String, dynamic>> verifyBvnMethod({
     required String token,
     required String guardianId,
-    required String edubanclSchoolId,
+    required String internalSchoolId,
     required String sessionId,
     required String method,
     required String phoneNumber,
@@ -1471,7 +1981,7 @@ class ApiService {
 
       final requestBody = {
         'guardianId': guardianId,
-        'edubanclSchoolId': edubanclSchoolId,
+        'internalSchoolId': internalSchoolId,
         'sessionId': sessionId,
         'method': method,
         'phoneNumber': phoneNumber,
@@ -1531,7 +2041,7 @@ class ApiService {
   Future<Map<String, dynamic>> confirmBvnOtp({
     required String token,
     required String guardianId,
-    required String edubanclSchoolId,
+    required String internalSchoolId,
     required String sessionId,
     required String otp,
     required String bvn,
@@ -1543,7 +2053,7 @@ class ApiService {
 
       final requestBody = {
         'guardianId': guardianId,
-        'edubanclSchoolId': edubanclSchoolId,
+        'internalSchoolId': internalSchoolId,
         'sessionId': sessionId,
         'otp': otp,
         'bvn': bvn,
@@ -2052,36 +2562,26 @@ class ApiService {
     required List<Map<String, dynamic>> scores,
   }) async {
     try {
-      if (JwtDecoder.isTokenExpired(token)) {
-        return {
-          'success': false,
-          'message': 'Session expired. Please login again.',
-          'expired': true,
-        };
-      }
-
       final url = Uri.parse('$baseUrl/Result/AddSubjectScores');
-      print('Adding subject scores at: $url');
+      print('📤 addSubjectScores → $url');
 
-      // Format as array of objects (the API expects an array)
-      final requestBody = [
-        {
-          'schoolId': schoolId,
-          'classroomId': classroomId,
-          'subjectId': subjectId,
-          'sessionId': sessionId,
-          'sessionTermId': sessionTermId,
-          'term': term,
-          'scores': scores.map((score) => {
-            'studentId': score['studentId'],
-            'ca': score['ca'],
-            'examScore': score['examScore'],
-            'remarks': score['remarks'] ?? 'Good performance',
-          }).toList(),
-        }
-      ];
+      // Backend expects the array under the key "dtos"
+      final body = {
+        'schoolId': schoolId,
+        'classroomId': classroomId,
+        'subjectId': subjectId,
+        'sessionId': sessionId,
+        'sessionTermId': sessionTermId,
+        'term': term,
+        'dtos': scores.map((s) => {
+          'studentId': s['studentId'],
+          'ca': s['ca'] ?? 0,
+          'examScore': s['examScore'] ?? 0,
+          'remarks': s['remarks'] ?? '',
+        }).toList(),
+      };
 
-      print('Request body: ${jsonEncode(requestBody)}');
+      print('📤 Body: ${jsonEncode(body)}');
 
       final response = await http.post(
         url,
@@ -2090,55 +2590,125 @@ class ApiService {
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode(requestBody),
+        body: jsonEncode(body),
       ).timeout(timeout);
 
-      print('Add subject scores response status: ${response.statusCode}');
-      print('Add subject scores response body: ${response.body}');
+      print('📥 ${response.statusCode} ${response.body}');
+      final data = jsonDecode(response.body);
 
-      if (response.body.isEmpty) {
-        return {
-          'success': false,
-          'message': 'Empty response from server',
-        };
-      }
-
-      final responseData = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && responseData['status'] == true) {
-        return {
-          'success': true,
-          'message': responseData['responseMessage'] ?? 'Scores added successfully',
-          'data': responseData['data'],
-        };
-      } else {
-        // Handle validation errors
-        String errorMessage = responseData['message'] ?? 'Failed to add scores';
-        if (responseData['errors'] != null) {
-          final errors = responseData['errors'];
-          if (errors['dtos'] != null) {
-            errorMessage = errors['dtos'][0];
-          } else if (errors['[0].subjectId'] != null) {
-            errorMessage = 'Invalid subject ID format. Please ensure subject ID is a valid GUID.';
-          } else if (errors['[0].sessionId'] != null) {
-            errorMessage = 'Invalid session ID format. Please ensure session ID is a valid GUID.';
-          }
-        }
-        return {
-          'success': false,
-          'message': errorMessage,
-        };
-      }
-    } catch (e) {
-      print('Add subject scores error: $e');
       return {
-        'success': false,
-        'message': 'Network error: ${e.toString()}',
+        'success': response.statusCode == 200 && data['status'] == true,
+        'message': data['responseMessage'] ?? 'Done',
+        'data': data['data'],
       };
+    } catch (e) {
+      print('❌ addSubjectScores error: $e');
+      return {'success': false, 'message': e.toString()};
     }
   }
 
 
+  /// Get attendance summary for every student in a classroom for a term.
+  ///
+  /// Endpoint:
+  /// GET /api/Attendance/GetClassAttendanceSummary/{schoolId}/{classroomId}/{termId}
+  ///
+  /// Returns a map keyed by studentId → { present, total, percentage }.
+  Future<Map<String, dynamic>> getClassAttendanceSummary({
+    required String token,
+    required String schoolId,
+    required String classroomId,
+    required String termId,
+  }) async {
+    try {
+      final url = Uri.parse(
+          '$baseUrl/Attendance/GetClassAttendanceSummary/$schoolId/$classroomId/$termId');
+      print('📤 getClassAttendanceSummary → $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(timeout);
+
+      print('📥 ${response.statusCode}: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {'success': false, 'byStudent': <String, Map<String, dynamic>>{}};
+      }
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['status'] == true) {
+        final raw = data['data'];
+
+        // The payload might be a list OR a map. Handle both shapes.
+        final Map<String, Map<String, dynamic>> byStudent = {};
+
+        if (raw is List) {
+          for (final item in raw) {
+            if (item is! Map) continue;
+            final sid = (item['studentId'] ?? item['id'])?.toString() ?? '';
+            if (sid.isEmpty) continue;
+            byStudent[sid] = {
+              'present': (item['presentCount'] as num?)?.toInt() ?? 0,
+              'total': (item['totalCount'] as num?)?.toInt() ?? 0,
+              'percentage': (item['percentage'] as num?)?.toDouble() ?? 0.0,
+            };
+          }
+        } else if (raw is Map) {
+          // If it's a wrapper like { students: [...] } or a keyed map
+          final maybeList = raw['students'] ?? raw['records'] ?? raw['data'];
+          if (maybeList is List) {
+            for (final item in maybeList) {
+              if (item is! Map) continue;
+              final sid = (item['studentId'] ?? item['id'])?.toString() ?? '';
+              if (sid.isEmpty) continue;
+              byStudent[sid] = {
+                'present': (item['presentCount'] as num?)?.toInt() ?? 0,
+                'total': (item['totalCount'] as num?)?.toInt() ?? 0,
+                'percentage': (item['percentage'] as num?)?.toDouble() ?? 0.0,
+              };
+            }
+          } else {
+            // Assume the map is already keyed by studentId
+            raw.forEach((k, v) {
+              if (v is Map) {
+                final sid = k.toString();
+                byStudent[sid] = {
+                  'present': (v['presentCount'] as num?)?.toInt() ?? 0,
+                  'total': (v['totalCount'] as num?)?.toInt() ?? 0,
+                  'percentage': (v['percentage'] as num?)?.toDouble() ?? 0.0,
+                };
+              }
+            });
+          }
+        }
+
+        return {
+          'success': true,
+          'byStudent': byStudent,
+          'message': data['responseMessage'] ?? 'Success',
+        };
+      }
+
+      return {
+        'success': false,
+        'byStudent': <String, Map<String, dynamic>>{},
+        'message': data['responseMessage'] ?? 'Failed',
+      };
+    } catch (e) {
+      print('❌ getClassAttendanceSummary error: $e');
+      return {
+        'success': false,
+        'byStudent': <String, Map<String, dynamic>>{},
+        'message': e.toString(),
+      };
+    }
+  }
 
 
   Future<Map<String, dynamic>> createAssignment({
@@ -2151,10 +2721,16 @@ class ApiService {
     required String termId,
   }) async {
     try {
+
+
+      final url = Uri.parse('$baseUrl/Assignment/CreateAssignment');
+      print('📤 createAssignment → $url');
+
       final response = await http.post(
-        Uri.parse('api/Assignment/CreateAssignment'),
+        url,
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
@@ -2165,7 +2741,7 @@ class ApiService {
           'dueDate': dueDate.toIso8601String(),
           'termId': termId,
         }),
-      );
+      ).timeout(timeout);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);

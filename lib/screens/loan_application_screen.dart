@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_provider.dart';
 import '../utils/app_colors.dart';
+import 'accept_terms_screen.dart';
 
 class LoanApplicationScreen extends StatefulWidget {
   final String creditAssessmentId;
@@ -95,102 +96,218 @@ class _LoanApplicationScreenState extends State<LoanApplicationScreen> {
     return Center(
       child: Padding(
         padding: EdgeInsets.all(isSmallScreen ? 16 : 24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                gradient: AppColors.cardGradient,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.success.withOpacity(0.3),
-                    blurRadius: 20,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  gradient: AppColors.cardGradient,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.success.withOpacity(0.3),
+                      blurRadius: 20,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.check_circle,
+                    color: Colors.white,
+                    size: 60,
                   ),
-                ],
-              ),
-              child: const Center(
-                child: Icon(
-                  Icons.check_circle,
-                  color: Colors.white,
-                  size: 60,
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Loan Application Submitted!',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
+              const SizedBox(height: 24),
+              const Text(
+                'Application Submitted!',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Your loan application has been submitted successfully.',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.textSecondary,
+              const SizedBox(height: 8),
+              Text(
+                'Your loan application has been submitted successfully.\n\n'
+                    'Next step: Review and accept the loan terms to proceed.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textSecondary,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.info.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.info.withOpacity(0.2)),
+              const SizedBox(height: 24),
+
+              // Progress indicator
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    _buildProgressStep(1, 'Submitted', true),
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: AppColors.grey,
+                      ),
+                    ),
+                    _buildProgressStep(2, 'Accept Terms', false),
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: AppColors.grey,
+                      ),
+                    ),
+                    _buildProgressStep(3, 'Mandate', false),
+                  ],
+                ),
               ),
-              child: Column(
-                children: [
-                  const Text(
-                    'Application ID:',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
+              const SizedBox(height: 24),
+
+              // Application ID
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.info.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.info.withOpacity(0.2)),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Application ID:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _applicationId ?? 'N/A',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // Accept Terms Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    if (_applicationId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Application ID not available'),
+                          backgroundColor: AppColors.error,
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AcceptTermsScreen(
+                          applicationId: _applicationId!,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.description),
+                  label: const Text(
+                    'Accept Loan Terms',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _applicationId ?? 'N/A',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.popUntil(context, (route) => route.isFirst);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: AppColors.primary),
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.popUntil(context, (route) => route.isFirst);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                  child: const Text(
+                    'Go to Dashboard',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
-                child: const Text(
-                  'Go to Dashboard',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildProgressStep(int step, String label, bool isActive) {
+    return Column(
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isActive ? AppColors.success : AppColors.greyLight,
+            border: Border.all(
+              color: isActive ? AppColors.success : AppColors.grey,
+              width: 2,
+            ),
+          ),
+          child: Center(
+            child: isActive
+                ? const Icon(Icons.check, color: Colors.white, size: 16)
+                : Text(
+              step.toString(),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: AppColors.grey,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: isActive ? AppColors.success : AppColors.grey,
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ],
     );
   }
 
@@ -467,6 +584,33 @@ class _LoanApplicationScreenState extends State<LoanApplicationScreen> {
             ),
           ),
         ),
+
+        const SizedBox(height: 16),
+
+        // Info about next steps
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.info.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.info.withOpacity(0.2)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline, color: AppColors.info, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'After submission, you will need to accept the loan terms and setup a repayment mandate.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -516,7 +660,8 @@ class _LoanApplicationScreenState extends State<LoanApplicationScreen> {
 
     if (amount > widget.eligibleAmount) {
       setState(() {
-        _errorMessage = 'Requested amount (₦${amount.toStringAsFixed(2)}) exceeds eligible amount (₦${widget.eligibleAmount.toStringAsFixed(2)})';
+        _errorMessage =
+        'Requested amount (₦${amount.toStringAsFixed(2)}) exceeds eligible amount (₦${widget.eligibleAmount.toStringAsFixed(2)})';
       });
       return;
     }
@@ -571,6 +716,13 @@ class _LoanApplicationScreenState extends State<LoanApplicationScreen> {
           _showSuccess = true;
           _applicationId = result['applicationId'];
         });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎉 Application submitted successfully!'),
+            backgroundColor: AppColors.success,
+          ),
+        );
       } else {
         String errorMessage = result['message'] ?? 'Failed to submit loan application';
 

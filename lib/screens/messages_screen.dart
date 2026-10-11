@@ -23,12 +23,12 @@ class _MessagesScreenState extends State<MessagesScreen> {
   bool _isRefreshing = false;
 
   // Cache for user names and details
-  Map<String, Map<String, dynamic>> _userDetailsCache = {};
+  final Map<String, Map<String, dynamic>> _userDetailsCache = {};
 
-  // Responsive variables
-  late bool _isMobile;
-  late bool _isTablet;
-  late bool _isDesktop;
+  // Responsive flags
+  bool _isMobile = true;
+  bool _isTablet = false;
+  bool _isDesktop = false;
 
   @override
   void initState() {
@@ -43,7 +43,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
     _currentUser = authProvider.currentUser!;
   }
 
-  Future<Map<String, dynamic>?> _getUserDetails(String userId, String userRole) async {
+  Future<Map<String, dynamic>?> _getUserDetails(
+      String userId, String userRole) async {
     if (_userDetailsCache.containsKey(userId)) {
       return _userDetailsCache[userId];
     }
@@ -63,13 +64,12 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
       switch (userRole.toLowerCase()) {
         case 'teacher':
-          name = '${userData['firstname'] ?? ''} ${userData['lastname'] ?? ''}'.trim();
-          break;
         case 'guardian':
-          name = '${userData['firstname'] ?? ''} ${userData['lastname'] ?? ''}'.trim();
-          break;
         case 'schooladmin':
-          name = '${userData['firstname'] ?? ''} ${userData['lastname'] ?? ''}'.trim();
+        case 'admin':
+          name =
+              '${userData['firstname'] ?? ''} ${userData['lastname'] ?? ''}'
+                  .trim();
           break;
         default:
           name = userId;
@@ -94,27 +94,23 @@ class _MessagesScreenState extends State<MessagesScreen> {
     };
   }
 
-  // Format time for conversation list (shows like "2:30 PM", "Yesterday", "Mon", "15/05/2024")
+  // "2:30 PM" / "Yesterday" / "Mon" / "15/05/2024"
   String _formatConversationTime(DateTime time) {
     final now = DateTime.now();
     final difference = now.difference(time);
 
     if (difference.inDays == 0) {
-      // Today - show time
       return _formatTimeOnly(time);
     } else if (difference.inDays == 1) {
       return 'Yesterday';
     } else if (difference.inDays < 7) {
-      // This week - show day name
       const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return weekdays[time.weekday - 1];
     } else {
-      // Older - show date
       return '${time.day}/${time.month}/${time.year}';
     }
   }
 
-  // Format time only (e.g., "2:30 PM")
   String _formatTimeOnly(DateTime time) {
     final localTime = time.toLocal();
     int hour = localTime.hour;
@@ -131,15 +127,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   Future<void> _fetchMessages() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     final token = Provider.of<AuthProvider>(context, listen: false).token;
     if (token == null) {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
       return;
     }
 
@@ -151,11 +143,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
       userRole: currentUserRole,
     );
 
-    if (result['success'] && mounted) {
-      final messagesData = result['data'] as List? ?? [];
-      final messages = messagesData.map((m) => MessageModel.fromJson(m)).toList();
+    if (!mounted) return;
 
-      // Group messages by conversation
+    if (result['success'] == true) {
+      final messagesData = result['data'] as List? ?? [];
+      final messages =
+      messagesData.map((m) => MessageModel.fromJson(m)).toList();
+
+      // Group by conversation (other user + role)
       final Map<String, MessageModel> latestMessages = {};
 
       for (var message in messages) {
@@ -168,7 +163,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
         final conversationKey = '$otherUserId|$otherUserRole';
 
         if (!latestMessages.containsKey(conversationKey) ||
-            message.sentAt.isAfter(latestMessages[conversationKey]!.sentAt)) {
+            message.sentAt
+                .isAfter(latestMessages[conversationKey]!.sentAt)) {
           latestMessages[conversationKey] = message;
         }
       }
@@ -176,8 +172,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
       final uniqueMessages = latestMessages.values.toList();
       uniqueMessages.sort((a, b) => b.sentAt.compareTo(a.sentAt));
 
-      // Fetch details for each unique user
-      List<Future> futures = [];
+      // Resolve names for all senders/receivers
+      final futures = <Future>[];
       for (var message in uniqueMessages) {
         final otherUserId = message.senderId == _currentUser.id
             ? message.receiverId
@@ -186,25 +182,29 @@ class _MessagesScreenState extends State<MessagesScreen> {
             ? message.receiverRole
             : message.senderRole;
 
-        futures.add(_getUserDetails(otherUserId, otherUserRole).then((details) {
-          if (details != null) {
-            if (message.senderId == _currentUser.id) {
-              message.receiverName = details['name'] as String?;
-            } else {
-              message.senderName = details['name'] as String?;
+        futures.add(
+          _getUserDetails(otherUserId, otherUserRole).then((details) {
+            if (details != null) {
+              if (message.senderId == _currentUser.id) {
+                message.receiverName = details['name'] as String?;
+              } else {
+                message.senderName = details['name'] as String?;
+              }
             }
-          }
-        }));
+          }),
+        );
       }
 
       await Future.wait(futures);
 
+      if (!mounted) return;
       setState(() {
         _messages = uniqueMessages;
         _isLoading = false;
         _isRefreshing = false;
       });
     } else {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _isRefreshing = false;
@@ -222,31 +222,26 @@ class _MessagesScreenState extends State<MessagesScreen> {
   String _getOtherUserName(MessageModel message) {
     if (message.senderId == _currentUser.id) {
       return message.receiverName ?? message.receiverId;
-    } else {
-      return message.senderName ?? message.senderId;
     }
+    return message.senderName ?? message.senderId;
   }
 
   String _getOtherUserRole(MessageModel message) {
     if (message.senderId == _currentUser.id) {
       return message.receiverRole;
-    } else {
-      return message.senderRole;
     }
+    return message.senderRole;
   }
 
   String _getOtherUserId(MessageModel message) {
     if (message.senderId == _currentUser.id) {
       return message.receiverId;
-    } else {
-      return message.senderId;
     }
+    return message.senderId;
   }
 
   Future<void> _refreshMessages() async {
-    setState(() {
-      _isRefreshing = true;
-    });
+    setState(() => _isRefreshing = true);
     await _fetchMessages();
   }
 
@@ -272,7 +267,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
         centerTitle: false,
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: AppColors.primary, size: _isMobile ? 20 : 24),
+            icon: Icon(
+              Icons.refresh,
+              color: AppColors.primary,
+              size: _isMobile ? 20 : 24,
+            ),
             onPressed: _refreshMessages,
           ),
         ],
@@ -281,85 +280,113 @@ class _MessagesScreenState extends State<MessagesScreen> {
         onRefresh: _refreshMessages,
         color: AppColors.primary,
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-            : _messages.isEmpty
-            ? Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.inbox,
-                size: _isMobile ? 48 : 64,
-                color: AppColors.grey,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'No messages yet',
-                style: TextStyle(
-                  fontSize: _isMobile ? 14 : 16,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Messages will appear here',
-                style: TextStyle(
-                  fontSize: _isMobile ? 12 : 13,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
+            ? const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
         )
-            : ListView.builder(
-          padding: EdgeInsets.all(_isMobile ? 12 : 16),
-          itemCount: _messages.length,
-          itemBuilder: (context, index) {
-            final message = _messages[index];
-            final otherUserName = _getOtherUserName(message);
-            final otherUserRole = _getOtherUserRole(message);
-            final otherUserId = _getOtherUserId(message);
-            final isUnread = !message.isRead && message.receiverId == _currentUser.id;
+            : _messages.isEmpty
+            ? _buildEmptyState()
+            : _buildMessagesList(),
+      ),
+    );
+  }
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: MessageListTile(
-                senderName: otherUserName,
-                senderRole: otherUserRole,
-                content: message.content,
-                time: _formatConversationTime(message.sentAt), // Using new time formatter
-                isRead: !isUnread,
-                onTap: () async {
-                  if (isUnread) {
-                    final token = Provider.of<AuthProvider>(context, listen: false).token;
-                    if (token != null) {
-                      await _apiService.markMessageAsRead(
-                        token: token,
-                        messageId: message.messageId,
-                      );
-                    }
-                  }
-
-                  final userDetails = await _getUserDetails(otherUserId, otherUserRole);
-
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ConversationScreen(
-                        userId: otherUserId,
-                        userRole: otherUserRole,
-                        userName: otherUserName,
-                        userEmail: userDetails?['email'] as String?,
-                        userPhone: userDetails?['phone'] as String?,
-                      ),
+  Widget _buildEmptyState() {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.inbox,
+                    size: _isMobile ? 48 : 64,
+                    color: AppColors.grey,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No messages yet',
+                    style: TextStyle(
+                      fontSize: _isMobile ? 14 : 16,
+                      color: AppColors.textSecondary,
                     ),
-                  ).then((_) => _refreshMessages());
-                },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Messages will appear here',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: _isMobile ? 12 : 13,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildMessagesList() {
+    return ListView.builder(
+      padding: EdgeInsets.all(_isMobile ? 12 : 16),
+      itemCount: _messages.length,
+      itemBuilder: (context, index) {
+        final message = _messages[index];
+        final otherUserName = _getOtherUserName(message);
+        final otherUserRole = _getOtherUserRole(message);
+        final otherUserId = _getOtherUserId(message);
+        final isUnread =
+            !message.isRead && message.receiverId == _currentUser.id;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: MessageListTile(
+            senderName: otherUserName,
+            senderRole: otherUserRole,
+            content: message.content,
+            time: _formatConversationTime(message.sentAt),
+            isRead: !isUnread,
+            onTap: () async {
+              if (isUnread) {
+                final token =
+                    Provider.of<AuthProvider>(context, listen: false).token;
+                if (token != null) {
+                  await _apiService.markMessageAsRead(
+                    token: token,
+                    messageId: message.messageId,
+                  );
+                }
+              }
+
+              final userDetails =
+              await _getUserDetails(otherUserId, otherUserRole);
+
+              if (!mounted) return;
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ConversationScreen(
+                    userId: otherUserId,
+                    userRole: otherUserRole,
+                    userName: otherUserName,
+                    userEmail: userDetails?['email'] as String?,
+                    userPhone: userDetails?['phone'] as String?,
+                  ),
+                ),
+              ).then((_) => _refreshMessages());
+            },
+          ),
+        );
+      },
     );
   }
 }
